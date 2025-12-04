@@ -48,12 +48,6 @@ android {
         minSdk = 24
     }
 
-    dependencies {
-        implementation("com.twilio:video-android:8.1.0")
-        testImplementation("org.jetbrains.kotlin:kotlin-test")
-        testImplementation("org.mockito:mockito-core:5.0.0")
-    }
-
     testOptions {
         unitTests.all {
             useJUnitPlatform()
@@ -65,4 +59,10 @@ android {
             }
         }
     }
+}
+
+dependencies {
+    implementation("com.twilio:video-android:7.9.1")
+    testImplementation("org.jetbrains.kotlin:kotlin-test")
+    testImplementation("org.mockito:mockito-core:5.0.0")
 }

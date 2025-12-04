@@ -39,6 +39,11 @@ android {
     }
 }
 
+dependencies {
+    // Twilio Video SDK - needed for plugin compilation
+    implementation("com.twilio:video-android:7.9.1")
+}
+
 flutter {
     source = "../.."
 }

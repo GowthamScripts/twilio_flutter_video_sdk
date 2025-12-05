@@ -2,9 +2,16 @@ package com.example.twilio_flutter_video_sdk
 
 import android.app.Activity
 import android.content.Context
+import android.content.pm.PackageManager
 import android.util.Log
 import androidx.annotation.NonNull
+import androidx.core.content.ContextCompat
+import android.Manifest
 import com.twilio.video.*
+import tvi.webrtc.Camera1Enumerator
+import tvi.webrtc.Camera2Enumerator
+import tvi.webrtc.CameraEnumerator
+import tvi.webrtc.VideoCapturer as WebRtcVideoCapturer
 import io.flutter.embedding.engine.plugins.FlutterPlugin
 import io.flutter.embedding.engine.plugins.activity.ActivityAware
 import io.flutter.embedding.engine.plugins.activity.ActivityPluginBinding
@@ -20,7 +27,8 @@ class TwilioFlutterVideoSdkPlugin :
     MethodCallHandler,
     ActivityAware,
     Room.Listener,
-    CameraCapturer.Listener {
+    CameraCapturer.Listener,
+    Camera2Capturer.Listener {
     
     private lateinit var channel: MethodChannel
     private lateinit var eventChannel: EventChannel
@@ -40,11 +48,43 @@ class TwilioFlutterVideoSdkPlugin :
     private var isAudioEnabled = true
     private var isVideoEnabled = true
     private var isFrontCamera = true
+    private var currentCameraId: String? = null
     
     companion object {
         private const val TAG = "TwilioVideoPlugin"
         private const val METHOD_CHANNEL = "twilio_flutter_video_sdk"
         private const val EVENT_CHANNEL = "twilio_flutter_video_sdk_events"
+    }
+    
+    // Helper: find Twilio/WebRTC device name for requested facing direction
+    private fun findDeviceNameForFacing(context: Context, preferFront: Boolean): String? {
+        val enumerator: CameraEnumerator = if (Camera2Enumerator.isSupported(context)) {
+            Camera2Enumerator(context)
+        } else {
+            Camera1Enumerator()
+        }
+        
+        val deviceNames = enumerator.deviceNames
+        Log.d(TAG, "Available WebRTC device names: ${deviceNames.joinToString()}")
+        
+        // Prefer front/back as requested
+        for (name in deviceNames) {
+            if (enumerator.isFrontFacing(name) && preferFront) {
+                Log.d(TAG, "Found front-facing device: $name")
+                return name
+            }
+            if (!enumerator.isFrontFacing(name) && !preferFront) {
+                Log.d(TAG, "Found back-facing device: $name")
+                return name
+            }
+        }
+        
+        // Fallback: return first available device name
+        val fallback = if (deviceNames.isNotEmpty()) deviceNames[0] else null
+        if (fallback != null) {
+            Log.d(TAG, "Using fallback device: $fallback")
+        }
+        return fallback
     }
 
     override fun onAttachedToEngine(@NonNull flutterPluginBinding: FlutterPlugin.FlutterPluginBinding) {
@@ -115,21 +155,56 @@ class TwilioFlutterVideoSdkPlugin :
                 return
             }
 
-            // Create camera capturer - in 7.x, CameraCapturer constructor takes (Context, String cameraId, Listener)
-            // Use empty string for default camera
-            cameraCapturer = CameraCapturer(activityContext, "", this)
+            // Check camera permission
+            if (ContextCompat.checkSelfPermission(activityContext, Manifest.permission.CAMERA)
+                != PackageManager.PERMISSION_GRANTED) {
+                result.error("PERMISSION_DENIED", "Camera permission not granted", null)
+                return
+            }
 
-            // Create local video track
+            // Find Twilio/WebRTC device name for requested facing direction
+            var deviceName: String? = null
             if (enableVideo) {
-                val capturer = cameraCapturer
-                if (capturer != null) {
-                    localVideoTrack = LocalVideoTrack.create(
-                        activityContext,
-                        enableVideo,
-                        capturer,
-                        "local-video-track"
-                    )
+                deviceName = findDeviceNameForFacing(activityContext, enableFrontCamera)
+                
+                if (deviceName.isNullOrEmpty()) {
+                    result.error("NO_CAMERA", "No camera device available", null)
+                    return
                 }
+                
+                currentCameraId = deviceName
+                Log.d(TAG, "Using Twilio/WebRTC device name: $deviceName")
+            }
+
+            // Create camera capturer using Twilio's camera classes
+            if (enableVideo && deviceName != null) {
+                // Use Camera2Capturer if supported, otherwise use CameraCapturer
+                cameraCapturer = if (Camera2Capturer.isSupported(activityContext)) {
+                    Camera2Capturer(activityContext, deviceName, this)
+                } else {
+                    CameraCapturer(activityContext, deviceName, this)
+                }
+                
+                // Attempt to cast the Twilio capturer to tvi.webrtc.VideoCapturer
+                // (Fix B: handles type mismatch between com.twilio.video.VideoCapturer and tvi.webrtc.VideoCapturer)
+                val webRtcCapturer: WebRtcVideoCapturer? = when (cameraCapturer) {
+                    is Camera2Capturer -> (cameraCapturer as? Any) as? WebRtcVideoCapturer
+                    is CameraCapturer -> (cameraCapturer as? Any) as? WebRtcVideoCapturer
+                    else -> null
+                }
+                
+                if (webRtcCapturer == null) {
+                    result.error("CAPTURER_CAST_FAILED", "Could not get tvi.webrtc.VideoCapturer from Twilio capturer", null)
+                    return
+                }
+                
+                // Create local video track with the WebRTC capturer
+                localVideoTrack = LocalVideoTrack.create(
+                    activityContext,
+                    enableVideo,
+                    webRtcCapturer,
+                    "local-video-track"
+                )
             }
 
             // Create local audio track
@@ -169,6 +244,7 @@ class TwilioFlutterVideoSdkPlugin :
             localAudioTrack?.release()
             cameraCapturer?.stopCapture()
             cameraCapturer = null
+            currentCameraId = null
             
             room?.disconnect()
             room = null
@@ -206,12 +282,48 @@ class TwilioFlutterVideoSdkPlugin :
 
     private fun switchCamera(result: Result) {
         try {
-            isFrontCamera = !isFrontCamera
-            // In 7.x, switchCamera takes a camera ID string
-            // For now, use empty string to toggle, or we'd need to find actual camera IDs
-            if (cameraCapturer is CameraCapturer) {
-                (cameraCapturer as CameraCapturer).switchCamera("")
+            val capturer = cameraCapturer  // local snapshot for safe smart-casting
+
+            if (capturer == null) {
+                result.error("SWITCH_CAMERA_ERROR", "Camera capturer not initialized", null)
+                return
             }
+
+            val activityContext = activity ?: context
+            if (activityContext == null) {
+                result.error("SWITCH_CAMERA_ERROR", "Activity context is required", null)
+                return
+            }
+
+            // Toggle camera facing direction flag (keep state)
+            isFrontCamera = !isFrontCamera
+
+            // Find new device name for the new facing direction
+            val newDeviceName = findDeviceNameForFacing(activityContext, isFrontCamera)
+            
+            if (newDeviceName.isNullOrEmpty()) {
+                result.error("SWITCH_CAMERA_ERROR", "No camera available for switching", null)
+                return
+            }
+
+            when (capturer) {
+                is Camera2Capturer -> {
+                    // capturer is already typed as Camera2Capturer
+                    capturer.switchCamera(newDeviceName)
+                }
+                is CameraCapturer -> {
+                    // capturer is already typed as CameraCapturer (legacy)
+                    capturer.switchCamera(newDeviceName)
+                }
+                else -> {
+                    result.error("SWITCH_CAMERA_ERROR", "Unsupported camera capturer type", null)
+                    return
+                }
+            }
+            
+            currentCameraId = newDeviceName
+            Log.d(TAG, "Switched camera to device: $newDeviceName")
+            
             result.success(null)
         } catch (e: Exception) {
             Log.e(TAG, "Error switching camera: ${e.message}", e)
@@ -290,7 +402,7 @@ class TwilioFlutterVideoSdkPlugin :
     // Track subscription methods may not exist in 7.x Room.Listener
     // Events will be handled through participant connection/disconnection events
 
-    // Camera2Capturer.Listener implementation
+    // CameraCapturer.Listener and Camera2Capturer.Listener implementation
     override fun onFirstFrameAvailable() {
         Log.d(TAG, "First frame available")
     }
@@ -299,8 +411,14 @@ class TwilioFlutterVideoSdkPlugin :
         Log.d(TAG, "Camera switched: $cameraId")
     }
 
+    // From CameraCapturer.Listener
     override fun onError(errorCode: Int) {
-        Log.e(TAG, "Camera error: $errorCode")
+        Log.e(TAG, "CameraCapturer error: $errorCode")
+    }
+
+    // From Camera2Capturer.Listener
+    override fun onError(error: Camera2Capturer.Exception) {
+        Log.e(TAG, "Camera2Capturer error: ${error.message}")
     }
 
     override fun onDetachedFromEngine(binding: FlutterPlugin.FlutterPluginBinding) {

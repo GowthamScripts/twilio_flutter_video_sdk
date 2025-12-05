@@ -1,6 +1,7 @@
 import Flutter
 import UIKit
 import TwilioVideo
+import AVFoundation
 
 public class TwilioFlutterVideoSdkPlugin: NSObject, FlutterPlugin {
     
@@ -80,15 +81,35 @@ public class TwilioFlutterVideoSdkPlugin: NSObject, FlutterPlugin {
         isVideoEnabled = enableVideo
         isFrontCamera = enableFrontCamera
         
-        // Create camera source
-        let cameraSource = enableFrontCamera ? CameraSource.frontCamera : CameraSource.backCamera
-        
         do {
-            camera = CameraSource(delegate: self, source: cameraSource)
+            // Create camera source with options
+            let options = CameraSourceOptions { builder in
+                // Configure options if needed
+            }
+            camera = CameraSource(delegate: self, options: options)
             
             // Create local video track
             if enableVideo, let camera = camera {
                 localVideoTrack = LocalVideoTrack(source: camera, enabled: true, name: "local-video-track")
+                
+                // Start capturing with the requested camera position
+                let position: AVCaptureDevice.Position = enableFrontCamera ? .front : .back
+                if let device = captureDevice(for: position) {
+                    camera.startCapture(device: device) { device, format, error in
+                        if let error = error {
+                            print("Camera startCapture error: \(error.localizedDescription)")
+                        } else {
+                            print("Camera started with device: \(String(describing: device))")
+                        }
+                    }
+                } else if let defaultDevice = AVCaptureDevice.default(for: .video) {
+                    // Fallback to default device
+                    camera.startCapture(device: defaultDevice) { _, _, error in
+                        if let error = error {
+                            print("Camera startCapture fallback error: \(error.localizedDescription)")
+                        }
+                    }
+                }
             }
             
             // Create local audio track
@@ -120,6 +141,7 @@ public class TwilioFlutterVideoSdkPlugin: NSObject, FlutterPlugin {
     
     private func disconnect(result: @escaping FlutterResult) {
         room?.disconnect()
+        camera?.stopCapture()
         localVideoTrack = nil
         localAudioTrack = nil
         camera = nil
@@ -142,20 +164,36 @@ public class TwilioFlutterVideoSdkPlugin: NSObject, FlutterPlugin {
     }
     
     private func switchCamera(result: @escaping FlutterResult) {
-        isFrontCamera = !isFrontCamera
-        let newCameraSource = isFrontCamera ? CameraSource.frontCamera : CameraSource.backCamera
-        
-        do {
-            camera = CameraSource(delegate: self, source: newCameraSource)
-            
-            if let camera = camera, let videoTrack = localVideoTrack {
-                videoTrack.source = camera
-            }
-            
-            result(nil)
-        } catch {
-            result(FlutterError(code: "SWITCH_CAMERA_ERROR", message: error.localizedDescription, details: nil))
+        guard let camera = camera else {
+            result(FlutterError(code: "SWITCH_CAMERA_ERROR", message: "Camera not initialized", details: nil))
+            return
         }
+        
+        isFrontCamera = !isFrontCamera
+        
+        // Determine new camera position
+        let newPosition: AVCaptureDevice.Position = isFrontCamera ? .front : .back
+        
+        // Get the new capture device
+        guard let newDevice = captureDevice(for: newPosition) else {
+            result(FlutterError(code: "SWITCH_CAMERA_ERROR", message: "No capture device available for position", details: nil))
+            return
+        }
+        
+        // Stop current capture and start with new device
+        camera.stopCapture()
+        camera.startCapture(device: newDevice) { device, format, error in
+            if let error = error {
+                result(FlutterError(code: "SWITCH_CAMERA_ERROR", message: error.localizedDescription, details: nil))
+            } else {
+                result(nil)
+            }
+        }
+    }
+    
+    // Helper: get capture device by position
+    private func captureDevice(for position: AVCaptureDevice.Position) -> AVCaptureDevice? {
+        return CameraSource.captureDevice(position: position)
     }
     
     private func sendEvent(event: String, data: [String: Any]) {

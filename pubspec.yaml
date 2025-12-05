@@ -1,6 +1,6 @@
 name: twilio_flutter_video_sdk
 description: "A new Flutter plugin project."
-version: 0.0.1
+version: 1.0.0+1
 homepage:
 
 environment:

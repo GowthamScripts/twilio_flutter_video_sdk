@@ -1,0 +1,41 @@
+PODS:
+  - Flutter (1.0.0)
+  - integration_test (0.0.1):
+    - Flutter
+  - permission_handler_apple (9.3.0):
+    - Flutter
+  - twilio_flutter_video_sdk (0.0.1):
+    - Flutter
+    - TwilioVideo (~> 5.3.0)
+  - TwilioVideo (5.3.0)
+
+DEPENDENCIES:
+  - Flutter (from `Flutter`)
+  - integration_test (from `.symlinks/plugins/integration_test/ios`)
+  - permission_handler_apple (from `.symlinks/plugins/permission_handler_apple/ios`)
+  - twilio_flutter_video_sdk (from `.symlinks/plugins/twilio_flutter_video_sdk/ios`)
+
+SPEC REPOS:
+  https://github.com/CocoaPods/Specs.git:
+    - TwilioVideo
+
+EXTERNAL SOURCES:
+  Flutter:
+    :path: Flutter
+  integration_test:
+    :path: ".symlinks/plugins/integration_test/ios"
+  permission_handler_apple:
+    :path: ".symlinks/plugins/permission_handler_apple/ios"
+  twilio_flutter_video_sdk:
+    :path: ".symlinks/plugins/twilio_flutter_video_sdk/ios"
+
+SPEC CHECKSUMS:
+  Flutter: cabc95a1d2626b1b06e7179b784ebcf0c0cde467
+  integration_test: 252f60fa39af5e17c3aa9899d35d908a0721b573
+  permission_handler_apple: 9878588469a2b0d0fc1e048d9f43605f92e6cec2
+  twilio_flutter_video_sdk: 2406d9b554cb001d3b8f62cf19d8959869216bc8
+  TwilioVideo: a7bdb489205098d605b2769b3352e8a0b3e9527a
+
+PODFILE CHECKSUM: 5910e3b3f057f41428ffafed7cc2e27d8fd2d33c
+
+COCOAPODS: 1.16.2

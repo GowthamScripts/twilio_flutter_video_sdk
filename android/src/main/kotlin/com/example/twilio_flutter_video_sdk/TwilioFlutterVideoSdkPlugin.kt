@@ -20,6 +20,9 @@ import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
 import io.flutter.plugin.common.MethodChannel.MethodCallHandler
 import io.flutter.plugin.common.MethodChannel.Result
+import io.flutter.plugin.platform.PlatformView
+import io.flutter.plugin.platform.PlatformViewFactory
+import io.flutter.plugin.common.StandardMessageCodec
 
 /** TwilioFlutterVideoSdkPlugin */
 class TwilioFlutterVideoSdkPlugin :
@@ -33,6 +36,7 @@ class TwilioFlutterVideoSdkPlugin :
     private lateinit var channel: MethodChannel
     private lateinit var eventChannel: EventChannel
     private var eventSink: EventChannel.EventSink? = null
+    private var flutterPluginBinding: FlutterPlugin.FlutterPluginBinding? = null
     
     private var activity: Activity? = null
     private var context: Context? = null
@@ -43,7 +47,11 @@ class TwilioFlutterVideoSdkPlugin :
     private var localVideoTrack: LocalVideoTrack? = null
     private var localAudioTrack: LocalAudioTrack? = null
     private var cameraCapturer: VideoCapturer? = null
-    private var videoView: VideoView? = null
+    private var localVideoView: VideoView? = null
+    
+    // Remote video views
+    private val remoteVideoViews = mutableMapOf<String, VideoView>()
+    private val remoteVideoTracks = mutableMapOf<String, RemoteVideoTrack>()
     
     private var isAudioEnabled = true
     private var isVideoEnabled = true
@@ -89,6 +97,8 @@ class TwilioFlutterVideoSdkPlugin :
 
     override fun onAttachedToEngine(@NonNull flutterPluginBinding: FlutterPlugin.FlutterPluginBinding) {
         context = flutterPluginBinding.applicationContext
+        this.flutterPluginBinding = flutterPluginBinding
+        
         channel = MethodChannel(flutterPluginBinding.binaryMessenger, METHOD_CHANNEL)
         channel.setMethodCallHandler(this)
         
@@ -102,6 +112,12 @@ class TwilioFlutterVideoSdkPlugin :
                 eventSink = null
             }
         })
+        
+        // Register PlatformView factory
+        flutterPluginBinding.platformViewRegistry.registerViewFactory(
+            "twilio_video_view",
+            TwilioVideoViewFactory(this)
+        )
     }
 
     override fun onMethodCall(@NonNull call: MethodCall, @NonNull result: Result) {
@@ -205,6 +221,9 @@ class TwilioFlutterVideoSdkPlugin :
                     webRtcCapturer,
                     "local-video-track"
                 )
+                
+                // Setup local video view
+                setupLocalVideoView(activityContext)
             }
 
             // Create local audio track
@@ -238,6 +257,23 @@ class TwilioFlutterVideoSdkPlugin :
         }
     }
 
+    private fun setupLocalVideoView(context: Context) {
+        val activityContext = activity ?: context
+        if (activityContext == null || localVideoTrack == null) return
+        
+        val localView = VideoView(activityContext)
+        localVideoTrack?.addSink(localView)
+        localVideoView = localView
+    }
+    
+    fun getVideoView(viewId: String): VideoView? {
+        return if (viewId == "0") {
+            localVideoView
+        } else {
+            remoteVideoViews[viewId]
+        }
+    }
+
     private fun disconnect(result: Result) {
         try {
             localVideoTrack?.release()
@@ -245,6 +281,11 @@ class TwilioFlutterVideoSdkPlugin :
             cameraCapturer?.stopCapture()
             cameraCapturer = null
             currentCameraId = null
+            
+            // Clean up video views
+            localVideoView = null
+            remoteVideoViews.clear()
+            remoteVideoTracks.clear()
             
             room?.disconnect()
             room = null
@@ -357,6 +398,160 @@ class TwilioFlutterVideoSdkPlugin :
 
     override fun onParticipantConnected(room: Room, participant: RemoteParticipant) {
         Log.d(TAG, "Participant connected: ${participant.identity}")
+        
+        // Attach listener to participant
+        participant.setListener(object : RemoteParticipant.Listener {
+            override fun onVideoTrackSubscribed(
+                participant: RemoteParticipant,
+                publication: RemoteVideoTrackPublication,
+                remoteVideoTrack: RemoteVideoTrack
+            ) {
+                val activityContext = activity ?: context
+                if (activityContext == null) return
+                
+                val remoteView = VideoView(activityContext)
+                remoteVideoTrack.addSink(remoteView)
+                remoteVideoViews[participant.sid] = remoteView
+                remoteVideoTracks[participant.sid] = remoteVideoTrack
+                
+                sendEvent("videoTrackAdded", mapOf(
+                    "track" to mapOf(
+                        "trackSid" to publication.trackSid,
+                        "participantSid" to participant.sid,
+                        "isEnabled" to true
+                    )
+                ))
+            }
+
+            override fun onVideoTrackUnsubscribed(
+                participant: RemoteParticipant,
+                publication: RemoteVideoTrackPublication,
+                remoteVideoTrack: RemoteVideoTrack
+            ) {
+                val remoteView = remoteVideoViews.remove(participant.sid)
+                remoteView?.let { remoteVideoTrack.removeSink(it) }
+                remoteVideoTracks.remove(participant.sid)
+
+                sendEvent("videoTrackRemoved", mapOf(
+                    "track" to mapOf(
+                        "trackSid" to publication.trackSid,
+                        "participantSid" to participant.sid,
+                        "isEnabled" to false
+                    )
+                ))
+            }
+
+            // Implement other track events if needed
+            override fun onAudioTrackSubscribed(
+                participant: RemoteParticipant,
+                publication: RemoteAudioTrackPublication,
+                remoteAudioTrack: RemoteAudioTrack
+            ) {
+                sendEvent("audioTrackAdded", mapOf("participantSid" to participant.sid))
+            }
+
+            override fun onAudioTrackUnsubscribed(
+                participant: RemoteParticipant,
+                publication: RemoteAudioTrackPublication,
+                remoteAudioTrack: RemoteAudioTrack
+            ) {
+                sendEvent("audioTrackRemoved", mapOf("participantSid" to participant.sid))
+            }
+
+            override fun onAudioTrackPublished(
+                participant: RemoteParticipant,
+                publication: RemoteAudioTrackPublication
+            ) {}
+            
+            override fun onAudioTrackUnpublished(
+                participant: RemoteParticipant,
+                publication: RemoteAudioTrackPublication
+            ) {}
+            
+            override fun onVideoTrackPublished(
+                participant: RemoteParticipant,
+                publication: RemoteVideoTrackPublication
+            ) {}
+            
+            override fun onVideoTrackUnpublished(
+                participant: RemoteParticipant,
+                publication: RemoteVideoTrackPublication
+            ) {}
+            
+            override fun onDataTrackPublished(
+                participant: RemoteParticipant,
+                publication: RemoteDataTrackPublication
+            ) {}
+            
+            override fun onDataTrackUnpublished(
+                participant: RemoteParticipant,
+                publication: RemoteDataTrackPublication
+            ) {}
+            
+            override fun onNetworkQualityLevelChanged(
+                participant: RemoteParticipant,
+                networkQualityLevel: NetworkQualityLevel
+            ) {}
+            
+            override fun onDataTrackSubscribed(
+                participant: RemoteParticipant,
+                publication: RemoteDataTrackPublication,
+                remoteDataTrack: RemoteDataTrack
+            ) {}
+            
+            override fun onDataTrackUnsubscribed(
+                participant: RemoteParticipant,
+                publication: RemoteDataTrackPublication,
+                remoteDataTrack: RemoteDataTrack
+            ) {}
+            
+            override fun onAudioTrackSubscriptionFailed(
+                participant: RemoteParticipant,
+                publication: RemoteAudioTrackPublication,
+                twilioException: TwilioException
+            ) {}
+            
+            override fun onVideoTrackSubscriptionFailed(
+                participant: RemoteParticipant,
+                publication: RemoteVideoTrackPublication,
+                twilioException: TwilioException
+            ) {}
+            
+            override fun onDataTrackSubscriptionFailed(
+                participant: RemoteParticipant,
+                publication: RemoteDataTrackPublication,
+                twilioException: TwilioException
+            ) {}
+            
+            override fun onAudioTrackEnabled(
+                participant: RemoteParticipant,
+                publication: RemoteAudioTrackPublication
+            ) {
+                // Optional: handle audio track enabled event
+            }
+            
+            override fun onAudioTrackDisabled(
+                participant: RemoteParticipant,
+                publication: RemoteAudioTrackPublication
+            ) {
+                // Optional: handle audio track disabled event
+            }
+            
+            override fun onVideoTrackEnabled(
+                participant: RemoteParticipant,
+                publication: RemoteVideoTrackPublication
+            ) {
+                // Optional: handle video track enabled event
+            }
+            
+            override fun onVideoTrackDisabled(
+                participant: RemoteParticipant,
+                publication: RemoteVideoTrackPublication
+            ) {
+                // Optional: handle video track disabled event
+            }
+        })
+
         sendEvent("participantConnected", mapOf(
             "participant" to mapOf(
                 "sid" to participant.sid,
@@ -369,6 +564,15 @@ class TwilioFlutterVideoSdkPlugin :
 
     override fun onParticipantDisconnected(room: Room, participant: RemoteParticipant) {
         Log.d(TAG, "Participant disconnected: ${participant.identity}")
+        
+        // Clean up remote video view
+        val remoteView = remoteVideoViews.remove(participant.sid)
+        remoteView?.let { view ->
+            // Remove sink from track if it exists
+            remoteVideoTracks[participant.sid]?.removeSink(view)
+        }
+        remoteVideoTracks.remove(participant.sid)
+        
         sendEvent("participantDisconnected", mapOf(
             "participant" to mapOf(
                 "sid" to participant.sid,
@@ -398,9 +602,6 @@ class TwilioFlutterVideoSdkPlugin :
         Log.d(TAG, "Reconnected to room")
         sendEvent("reconnected", emptyMap())
     }
-
-    // Track subscription methods may not exist in 7.x Room.Listener
-    // Events will be handled through participant connection/disconnection events
 
     // CameraCapturer.Listener and Camera2Capturer.Listener implementation
     override fun onFirstFrameAvailable() {
@@ -441,5 +642,50 @@ class TwilioFlutterVideoSdkPlugin :
 
     override fun onDetachedFromActivity() {
         activity = null
+    }
+}
+
+// PlatformView Factory for Android
+class TwilioVideoViewFactory(private val plugin: TwilioFlutterVideoSdkPlugin) : PlatformViewFactory(StandardMessageCodec.INSTANCE) {
+    
+    override fun create(context: Context, viewId: Int, args: Any?): PlatformView {
+        // Extract viewId from creationParams
+        var viewIdString = "0" // default to local
+        if (args is Map<*, *>) {
+            val viewIdArg = args["viewId"]
+            if (viewIdArg is String) {
+                viewIdString = viewIdArg
+            }
+        }
+        
+        return TwilioVideoPlatformView(context, viewIdString, plugin)
+    }
+}
+
+// PlatformView implementation for Android
+class TwilioVideoPlatformView(
+    private val context: Context,
+    private val viewId: String,
+    private val plugin: TwilioFlutterVideoSdkPlugin
+) : PlatformView {
+    
+    private var videoView: VideoView? = null
+    
+    override fun getView(): android.view.View {
+        // Get the actual VideoView from the plugin
+        videoView = plugin.getVideoView(viewId)
+        
+        if (videoView != null) {
+            return videoView!!
+        }
+        
+        // Return placeholder if view not ready yet
+        val placeholder = android.view.View(context)
+        placeholder.setBackgroundColor(android.graphics.Color.BLACK)
+        return placeholder
+    }
+    
+    override fun dispose() {
+        // View disposal is handled by the plugin
     }
 }

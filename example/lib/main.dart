@@ -46,6 +46,10 @@ class _VideoRoomScreenState extends State<VideoRoomScreen> {
   StreamSubscription<TwilioVideoEvent>? _eventSubscription;
   StreamSubscription<String>? _errorSubscription;
   StreamSubscription<ParticipantInfo>? _participantSubscription;
+  StreamSubscription<VideoTrackInfo>? _videoTrackSubscription;
+  
+  // Track remote participant SIDs for video views
+  final Set<String> _remoteParticipantSids = {};
 
   @override
   void initState() {
@@ -58,6 +62,7 @@ class _VideoRoomScreenState extends State<VideoRoomScreen> {
     _eventSubscription?.cancel();
     _errorSubscription?.cancel();
     _participantSubscription?.cancel();
+    _videoTrackSubscription?.cancel();
     _accessTokenController.dispose();
     _roomNameController.dispose();
     _room?.disconnect();
@@ -101,12 +106,30 @@ class _VideoRoomScreenState extends State<VideoRoomScreen> {
       });
 
       _participantSubscription = _room!.participantEvents.listen((participant) {
+        setState(() {
+          if (_isConnected) {
+            _remoteParticipantSids.add(participant.sid);
+          } else {
+            _remoteParticipantSids.remove(participant.sid);
+          }
+        });
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('Participant ${participant.identity} ${_isConnected ? "connected" : "disconnected"}'),
             duration: const Duration(seconds: 2),
           ),
         );
+      });
+      
+      // Listen to video track events to track participant SIDs
+      _videoTrackSubscription = _room!.videoTrackEvents.listen((track) {
+        setState(() {
+          if (track.isEnabled) {
+            _remoteParticipantSids.add(track.participantSid);
+          } else {
+            _remoteParticipantSids.remove(track.participantSid);
+          }
+        });
       });
 
       // Join room
@@ -143,6 +166,7 @@ class _VideoRoomScreenState extends State<VideoRoomScreen> {
         case TwilioVideoEvent.disconnected:
           _statusMessage = 'Disconnected';
           _isConnected = false;
+          _remoteParticipantSids.clear();
           break;
         case TwilioVideoEvent.connectionFailure:
           _statusMessage = 'Connection failed';
@@ -153,6 +177,18 @@ class _VideoRoomScreenState extends State<VideoRoomScreen> {
           break;
         case TwilioVideoEvent.reconnected:
           _statusMessage = 'Reconnected';
+          break;
+        case TwilioVideoEvent.participantConnected:
+          // Participant SID will be available from participant events
+          break;
+        case TwilioVideoEvent.participantDisconnected:
+          // Participant SID will be removed from participant events
+          break;
+        case TwilioVideoEvent.videoTrackAdded:
+          // Video track added - view will be available
+          break;
+        case TwilioVideoEvent.videoTrackRemoved:
+          // Video track removed
           break;
         default:
           break;
@@ -168,6 +204,7 @@ class _VideoRoomScreenState extends State<VideoRoomScreen> {
         _statusMessage = 'Disconnected';
         _isMuted = false;
         _isVideoEnabled = true;
+        _remoteParticipantSids.clear();
       });
     } catch (e) {
       setState(() {
@@ -295,8 +332,79 @@ class _VideoRoomScreenState extends State<VideoRoomScreen> {
             ),
             const SizedBox(height: 24),
             
-            // Control Buttons (only visible when connected)
+            // Video Views (only visible when connected)
             if (_isConnected) ...[
+              const Divider(),
+              const SizedBox(height: 16),
+              Text(
+                'Video',
+                style: Theme.of(context).textTheme.titleLarge,
+              ),
+              const SizedBox(height: 16),
+              
+              // Local video view
+              Card(
+                child: Padding(
+                  padding: const EdgeInsets.all(8.0),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Local Video',
+                        style: Theme.of(context).textTheme.titleSmall,
+                      ),
+                      const SizedBox(height: 8),
+                      SizedBox(
+                        height: 200,
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(8),
+                          child: const TwilioVideoView(
+                            viewId: "0",
+                            width: double.infinity,
+                            height: 200,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
+              
+              // Remote video views
+              if (_remoteParticipantSids.isNotEmpty) ...[
+                Text(
+                  'Remote Participants (${_remoteParticipantSids.length})',
+                  style: Theme.of(context).textTheme.titleSmall,
+                ),
+                const SizedBox(height: 8),
+                GridView.builder(
+                  shrinkWrap: true,
+                  physics: const NeverScrollableScrollPhysics(),
+                  gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                    crossAxisCount: 2,
+                    crossAxisSpacing: 8,
+                    mainAxisSpacing: 8,
+                    childAspectRatio: 16 / 9,
+                  ),
+                  itemCount: _remoteParticipantSids.length,
+                  itemBuilder: (context, index) {
+                    final participantSid = _remoteParticipantSids.elementAt(index);
+                    return Card(
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(8),
+                        child: TwilioVideoView(
+                          viewId: participantSid,
+                          width: double.infinity,
+                          height: double.infinity,
+                        ),
+                      ),
+                    );
+                  },
+                ),
+                const SizedBox(height: 16),
+              ],
+              
               const Divider(),
               const SizedBox(height: 16),
               Text(

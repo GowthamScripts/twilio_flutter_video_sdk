@@ -8,11 +8,16 @@ public class TwilioFlutterVideoSdkPlugin: NSObject, FlutterPlugin {
     private var methodChannel: FlutterMethodChannel?
     private var eventChannel: FlutterEventChannel?
     private var eventSink: FlutterEventSink?
+    private var registrar: FlutterPluginRegistrar?
     
     private var room: Room?
     private var camera: CameraSource?
     private var localVideoTrack: LocalVideoTrack?
     private var localAudioTrack: LocalAudioTrack?
+    private var localVideoView: VideoView?
+    
+    private var remoteVideoViews: [String: VideoView] = [:]
+    private var remoteVideoTracks: [String: RemoteVideoTrack] = [:]
     
     private var isAudioEnabled = true
     private var isVideoEnabled = true
@@ -25,9 +30,14 @@ public class TwilioFlutterVideoSdkPlugin: NSObject, FlutterPlugin {
         let instance = TwilioFlutterVideoSdkPlugin()
         instance.methodChannel = methodChannel
         instance.eventChannel = eventChannel
+        instance.registrar = registrar
         
         registrar.addMethodCallDelegate(instance, channel: methodChannel)
         eventChannel.setStreamHandler(instance)
+        
+        // Register PlatformView factory for dynamic view creation
+        let factory = TwilioVideoViewFactory(plugin: instance)
+        registrar.register(factory, withId: "twilio_video_view")
     }
     
     public func handle(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
@@ -92,6 +102,9 @@ public class TwilioFlutterVideoSdkPlugin: NSObject, FlutterPlugin {
             if enableVideo, let camera = camera {
                 localVideoTrack = LocalVideoTrack(source: camera, enabled: true, name: "local-video-track")
                 
+                // Setup local video view
+                setupLocalVideoView()
+                
                 // Start capturing with the requested camera position
                 let position: AVCaptureDevice.Position = enableFrontCamera ? .front : .back
                 if let device = captureDevice(for: position) {
@@ -142,6 +155,12 @@ public class TwilioFlutterVideoSdkPlugin: NSObject, FlutterPlugin {
     private func disconnect(result: @escaping FlutterResult) {
         room?.disconnect()
         camera?.stopCapture()
+        
+        // Clean up video views
+        localVideoView = nil
+        remoteVideoViews.removeAll()
+        remoteVideoTracks.removeAll()
+        
         localVideoTrack = nil
         localAudioTrack = nil
         camera = nil
@@ -149,6 +168,22 @@ public class TwilioFlutterVideoSdkPlugin: NSObject, FlutterPlugin {
         
         sendEvent(event: "disconnected", data: [:])
         result(nil)
+    }
+    
+    private func setupLocalVideoView() {
+        guard let videoTrack = localVideoTrack else { return }
+        
+        let videoView = VideoView(frame: CGRect(x: 0, y: 0, width: 300, height: 400))
+        videoTrack.addRenderer(videoView)
+        localVideoView = videoView
+    }
+    
+    func getVideoView(for viewId: String) -> VideoView? {
+        if viewId == "0" {
+            return localVideoView
+        } else {
+            return remoteVideoViews[viewId]
+        }
     }
     
     private func setMuted(muted: Bool, result: @escaping FlutterResult) {
@@ -239,10 +274,13 @@ extension TwilioFlutterVideoSdkPlugin: RoomDelegate {
     }
     
     public func participantDidConnect(room: Room, participant: RemoteParticipant) {
+        let participantSid = participant.sid ?? ""
+        let participantIdentity = participant.identity ?? ""
+        
         sendEvent(event: "participantConnected", data: [
             "participant": [
-                "sid": participant.sid,
-                "identity": participant.identity ?? "",
+                "sid": participantSid,
+                "identity": participantIdentity,
                 "isAudioEnabled": true,
                 "isVideoEnabled": true
             ]
@@ -250,10 +288,19 @@ extension TwilioFlutterVideoSdkPlugin: RoomDelegate {
     }
     
     public func participantDidDisconnect(room: Room, participant: RemoteParticipant) {
+        let participantSid = participant.sid ?? ""
+        let participantIdentity = participant.identity ?? ""
+        
+        // Clean up remote video view
+        if let remoteView = remoteVideoViews.removeValue(forKey: participantSid) {
+            remoteView.removeFromSuperview()
+        }
+        remoteVideoTracks.removeValue(forKey: participantSid)
+        
         sendEvent(event: "participantDisconnected", data: [
             "participant": [
-                "sid": participant.sid,
-                "identity": participant.identity ?? "",
+                "sid": participantSid,
+                "identity": participantIdentity,
                 "isAudioEnabled": false,
                 "isVideoEnabled": false
             ]
@@ -261,41 +308,66 @@ extension TwilioFlutterVideoSdkPlugin: RoomDelegate {
     }
     
     public func participant(participant: RemoteParticipant, didEnableVideoTrack videoTrack: RemoteVideoTrackPublication) {
+        guard let remoteTrack = videoTrack.remoteTrack else { return }
+        
+        let participantSid = participant.sid ?? ""
+        let trackSid = videoTrack.trackSid ?? ""
+        
+        // Create video view for remote participant
+        let remoteView = VideoView(frame: CGRect(x: 0, y: 0, width: 300, height: 400))
+        remoteTrack.addRenderer(remoteView)
+        remoteVideoViews[participantSid] = remoteView
+        remoteVideoTracks[participantSid] = remoteTrack
+        
+        // Remote video view is now available via factory
+        
         sendEvent(event: "videoTrackAdded", data: [
             "track": [
-                "trackSid": videoTrack.trackSid,
-                "participantSid": participant.sid,
+                "trackSid": trackSid,
+                "participantSid": participantSid,
                 "isEnabled": true
             ]
         ])
     }
     
     public func participant(participant: RemoteParticipant, didDisableVideoTrack videoTrack: RemoteVideoTrackPublication) {
+        let participantSid = participant.sid ?? ""
+        let trackSid = videoTrack.trackSid ?? ""
+        
+        // Remove remote video view
+        if let remoteView = remoteVideoViews.removeValue(forKey: participantSid) {
+            remoteView.removeFromSuperview()
+        }
+        remoteVideoTracks.removeValue(forKey: participantSid)
+        
         sendEvent(event: "videoTrackRemoved", data: [
             "track": [
-                "trackSid": videoTrack.trackSid,
-                "participantSid": participant.sid,
+                "trackSid": trackSid,
+                "participantSid": participantSid,
                 "isEnabled": false
             ]
         ])
     }
     
     public func participant(participant: RemoteParticipant, didEnableAudioTrack audioTrack: RemoteAudioTrackPublication) {
+        let participantSid = participant.sid ?? ""
         sendEvent(event: "audioTrackAdded", data: [
-            "participantSid": participant.sid
+            "participantSid": participantSid
         ])
     }
     
     public func participant(participant: RemoteParticipant, didDisableAudioTrack audioTrack: RemoteAudioTrackPublication) {
+        let participantSid = participant.sid ?? ""
         sendEvent(event: "audioTrackRemoved", data: [
-            "participantSid": participant.sid
+            "participantSid": participantSid
         ])
     }
     
     public func dominantSpeakerDidChange(room: Room, participant: RemoteParticipant?) {
         if let participant = participant {
+            let participantSid = participant.sid ?? ""
             sendEvent(event: "dominantSpeakerChanged", data: [
-                "participantSid": participant.sid
+                "participantSid": participantSid
             ])
         }
     }
@@ -317,5 +389,56 @@ extension TwilioFlutterVideoSdkPlugin: CameraSourceDelegate {
     
     public func cameraSourceDidFail(source: CameraSource, error: Error) {
         sendEvent(event: "error", data: ["error": error.localizedDescription])
+    }
+}
+
+// MARK: - PlatformView Factory
+class TwilioVideoViewFactory: NSObject, FlutterPlatformViewFactory {
+    private weak var plugin: TwilioFlutterVideoSdkPlugin?
+    
+    init(plugin: TwilioFlutterVideoSdkPlugin) {
+        self.plugin = plugin
+        super.init()
+    }
+    
+    func create(withFrame frame: CGRect, viewIdentifier viewId: Int64, arguments args: Any?) -> FlutterPlatformView {
+        // Extract viewId from creationParams
+        var viewIdString = "0" // default to local
+        if let argsDict = args as? [String: Any], let id = argsDict["viewId"] as? String {
+            viewIdString = id
+        }
+        
+        return TwilioVideoPlatformView(frame: frame, viewId: viewIdString, plugin: plugin)
+    }
+    
+    func createArgsCodec() -> FlutterMessageCodec & NSObjectProtocol {
+        return FlutterStandardMessageCodec.sharedInstance()
+    }
+}
+
+// MARK: - PlatformView
+class TwilioVideoPlatformView: NSObject, FlutterPlatformView {
+    private var frame: CGRect
+    private var viewId: String
+    private weak var plugin: TwilioFlutterVideoSdkPlugin?
+    
+    init(frame: CGRect, viewId: String, plugin: TwilioFlutterVideoSdkPlugin?) {
+        self.frame = frame
+        self.viewId = viewId
+        self.plugin = plugin
+        super.init()
+    }
+    
+    func view() -> UIView {
+        // Get the actual VideoView from the plugin
+        if let videoView = plugin?.getVideoView(for: viewId) {
+            videoView.frame = frame
+            return videoView
+        }
+        
+        // Return placeholder if view not ready yet
+        let placeholder = UIView(frame: frame)
+        placeholder.backgroundColor = .black
+        return placeholder
     }
 }

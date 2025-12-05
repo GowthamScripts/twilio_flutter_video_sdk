@@ -86,7 +86,7 @@ public class TwilioFlutterVideoSdkPlugin: NSObject, FlutterPlugin {
             let options = CameraSourceOptions { builder in
                 // Configure options if needed
             }
-            camera = CameraSource(delegate: self, options: options)
+            camera = CameraSource(options: options, delegate: self)
             
             // Create local video track
             if enableVideo, let camera = camera {

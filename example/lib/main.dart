@@ -256,6 +256,7 @@ class _VideoRoomScreenState extends State<VideoRoomScreen> {
             
             // Access Token Input
             TextField(
+              
               controller: _accessTokenController,
               decoration: const InputDecoration(
                 labelText: 'Access Token',

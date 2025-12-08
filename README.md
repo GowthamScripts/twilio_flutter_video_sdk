@@ -72,7 +72,89 @@ Run `pod install` in the `ios/` directory after adding the plugin.
 
 ## Usage
 
-### Basic Example
+### Quick Start with VideoRoomScreen (Recommended)
+
+The easiest way to use the plugin is with the built-in `VideoRoomScreen` widget:
+
+```dart
+import 'package:twilio_flutter_video_sdk/twilio_flutter_video_sdk.dart';
+import 'package:permission_handler/permission_handler.dart';
+
+// Request permissions first
+await [Permission.camera, Permission.microphone].request();
+
+// Navigate to video room screen
+Navigator.push(
+  context,
+  MaterialPageRoute(
+    builder: (context) => VideoRoomScreen(
+      options: VideoRoomScreenOptions(
+        accessToken: 'YOUR_ACCESS_TOKEN',
+        roomName: 'my-room',
+        enableAudio: true,
+        enableVideo: true,
+        enableFrontCamera: true,
+        onConnected: () {
+          print('Connected to room!');
+        },
+        onDisconnected: () {
+          print('Disconnected from room');
+        },
+        onConnectionFailure: (error) {
+          print('Connection failed: $error');
+        },
+      ),
+    ),
+  ),
+);
+```
+
+### Custom VideoRoomScreen
+
+You can customize the video room screen with your own widgets:
+
+```dart
+VideoRoomScreen(
+  options: VideoRoomScreenOptions(
+    accessToken: 'YOUR_ACCESS_TOKEN',
+    roomName: 'my-room',
+    // Custom local video widget
+    localVideoBuilder: (context) => Container(
+      height: 200,
+      child: TwilioVideoView(viewId: "0"),
+    ),
+    // Custom remote video widget
+    remoteVideoBuilder: (context, participantSid) => Container(
+      height: 150,
+      child: TwilioVideoView(viewId: participantSid),
+    ),
+    // Custom controls
+    controlsBuilder: (context, controller) => Row(
+      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+      children: [
+        IconButton(
+          icon: Icon(controller.isMuted ? Icons.mic_off : Icons.mic),
+          onPressed: controller.toggleMute,
+        ),
+        IconButton(
+          icon: Icon(controller.isVideoEnabled ? Icons.videocam : Icons.videocam_off),
+          onPressed: controller.toggleVideo,
+        ),
+        IconButton(
+          icon: Icon(Icons.cameraswitch),
+          onPressed: controller.switchCamera,
+        ),
+        IconButton(
+          icon: Icon(Icons.call_end),
+          onPressed: controller.disconnect,
+        ),
+      ],
+    ),
+  ),
+)
+```
+
+### Basic Example (Manual Implementation)
 
 ```dart
 import 'package:twilio_flutter_video_sdk/twilio_flutter_video_sdk.dart';
@@ -89,9 +171,9 @@ final room = videoController.createRoom();
 
 // Listen to events
 room.events.listen((event) {
-  print('Event: ${event.event}');
-  if (event.event == 'connected') {
-    print('Connected to room: ${event.data['roomName']}');
+  print('Event: $event');
+  if (event == TwilioVideoEvent.connected) {
+    print('Connected to room');
   }
 });
 
@@ -101,7 +183,7 @@ room.errors.listen((error) {
 
 // Listen to participant events
 room.participantEvents.listen((participant) {
-  print('Participant: ${participant.identity} ${participant.isConnected ? "connected" : "disconnected"}');
+  print('Participant: ${participant.identity} connected');
 });
 
 // Listen to video track events
@@ -180,9 +262,9 @@ class _VideoRoomScreenState extends State<VideoRoomScreen> {
     
     // Listen to connection events
     _room!.events.listen((event) {
-      if (event.event == 'connected') {
+      if (event == TwilioVideoEvent.connected) {
         setState(() => _isConnected = true);
-      } else if (event.event == 'disconnected') {
+      } else if (event == TwilioVideoEvent.disconnected) {
         setState(() {
           _isConnected = false;
           _remoteParticipantSids.clear();
@@ -275,6 +357,67 @@ Represents a video room connection.
 - `Stream<ParticipantInfo> participantEvents` - Participant updates
 - `Stream<VideoTrackInfo> videoTrackEvents` - Video track updates
 - `Stream<String> errors` - Error messages
+
+### VideoRoomScreen
+
+Ready-to-use video room screen widget with built-in UI and controls.
+
+```dart
+VideoRoomScreen({
+  required VideoRoomScreenOptions options,
+  VideoRoomScreenController? controller,
+})
+```
+
+**Features:**
+- Complete UI with local and remote video views
+- Built-in controls (mute, video toggle, camera switch, disconnect)
+- Automatic handling of video tracks and participants
+- Customizable with builder functions
+- Optional controller for programmatic control
+
+### VideoRoomScreenOptions
+
+Configuration for `VideoRoomScreen`.
+
+```dart
+VideoRoomScreenOptions({
+  required String accessToken,        // Twilio access token
+  required String roomName,           // Room name to join
+  bool enableAudio = true,            // Enable audio by default
+  bool enableVideo = true,            // Enable video by default
+  bool enableFrontCamera = true,      // Use front camera by default
+  bool showInputFields = false,      // Show token/room input fields
+  String? appBarTitle,                // Custom app bar title
+  VoidCallback? onConnected,          // Called when connected
+  VoidCallback? onDisconnected,       // Called when disconnected
+  Function(String)? onConnectionFailure, // Called on connection failure
+  Widget Function(BuildContext)? localVideoBuilder,  // Custom local video widget
+  Widget Function(BuildContext, String)? remoteVideoBuilder, // Custom remote video widget
+  Widget Function(BuildContext, VideoRoomScreenController)? controlsBuilder, // Custom controls
+})
+```
+
+### VideoRoomScreenController
+
+Controller for programmatically controlling `VideoRoomScreen`.
+
+```dart
+final controller = VideoRoomScreenController();
+
+// Properties
+controller.isConnected      // Whether connected to room
+controller.isMuted          // Whether audio is muted
+controller.isVideoEnabled   // Whether video is enabled
+controller.isFrontCamera   // Whether using front camera
+controller.room            // Access to TwilioVideoRoom instance
+
+// Methods
+await controller.toggleMute();     // Toggle mute state
+await controller.toggleVideo();    // Toggle video on/off
+await controller.switchCamera();   // Switch camera
+await controller.disconnect();     // Disconnect from room
+```
 
 ### TwilioVideoView
 
@@ -500,6 +643,7 @@ if (statuses[Permission.camera]?.isGranted == true &&
 - Video track enabled/disabled handling
 - Automatic handling of existing participants
 - Proper cleanup when video is disabled (prevents frozen frames)
+- **VideoRoomScreen widget** - Ready-to-use video room screen with built-in UI and controls
 
 ## Contributing
 

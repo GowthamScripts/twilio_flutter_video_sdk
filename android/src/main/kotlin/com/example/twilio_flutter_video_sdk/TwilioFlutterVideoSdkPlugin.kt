@@ -3,6 +3,8 @@ package com.example.twilio_flutter_video_sdk
 import android.app.Activity
 import android.content.Context
 import android.content.pm.PackageManager
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
 import androidx.annotation.NonNull
 import androidx.core.content.ContextCompat
@@ -383,44 +385,95 @@ class TwilioFlutterVideoSdkPlugin :
         this.room = room
         localParticipant = room.localParticipant
         
+        Log.d(TAG, "Total remote participants: ${room.remoteParticipants.size}")
+        
+        // When we join a room, check for existing participants who may already have video tracks
+        // This handles the case where remote participants joined before us
+        for (participant in room.remoteParticipants) {
+            val participantSid = participant.sid
+            Log.d(TAG, "🔍 Found existing participant: ${participant.identity}, SID: $participantSid")
+            
+            // Attach listener to existing participant FIRST to catch any track subscription events
+            setupParticipantListener(participant)
+            
+            // Check for already-subscribed video tracks immediately
+            checkExistingTracksForParticipant(participant)
+            
+            // Also check again after delays to catch tracks that are still being subscribed
+            // Some tracks may take time to fully subscribe when joining an active room
+            Handler(Looper.getMainLooper()).postDelayed({
+                Log.d(TAG, "⏰ Delayed check #1 (500ms) for participant: $participantSid")
+                checkExistingTracksForParticipant(participant)
+            }, 500)
+            
+            Handler(Looper.getMainLooper()).postDelayed({
+                Log.d(TAG, "⏰ Delayed check #2 (1000ms) for participant: $participantSid")
+                checkExistingTracksForParticipant(participant)
+            }, 1000)
+            
+            Handler(Looper.getMainLooper()).postDelayed({
+                Log.d(TAG, "⏰ Delayed check #3 (2000ms) for participant: $participantSid")
+                checkExistingTracksForParticipant(participant)
+            }, 2000)
+        }
+        
         sendEvent("connected", mapOf("roomName" to (room.name ?: "")))
     }
-
-    override fun onConnectFailure(room: Room, error: TwilioException) {
-        Log.e(TAG, "Failed to connect to room: ${error.message}")
-        sendEvent("connectionFailure", mapOf("error" to (error.message ?: "Unknown error")))
-    }
-
-    override fun onDisconnected(room: Room, error: TwilioException?) {
-        Log.d(TAG, "Disconnected from room: ${room.name}")
-        sendEvent("disconnected", emptyMap())
-    }
-
-    override fun onParticipantConnected(room: Room, participant: RemoteParticipant) {
-        Log.d(TAG, "Participant connected: ${participant.identity}")
+    
+    // Helper method to check for existing tracks on a participant
+    private fun checkExistingTracksForParticipant(participant: RemoteParticipant) {
+        val participantSid = participant.sid
+        Log.d(TAG, "Checking existing participant's video tracks for: $participantSid")
+        Log.d(TAG, "   Total remoteVideoTracks: ${participant.remoteVideoTracks.size}")
         
-        // Attach listener to participant
+        if (participant.remoteVideoTracks.isEmpty()) {
+            Log.d(TAG, "   No remote video tracks found for participant: $participantSid")
+            return
+        }
+        
+        // Iterate over the collection of RemoteVideoTrackPublication
+        // remoteVideoTracks is a collection (List/Set) of RemoteVideoTrackPublication
+        for (videoTrackPublication in participant.remoteVideoTracks) {
+            val trackSid = videoTrackPublication.trackSid
+            // In Twilio SDK 7.9.1, check if track is subscribed
+            // The track is automatically subscribed when we join, so we can try to access it
+            // If it's not available yet, onVideoTrackSubscribed will be called
+            try {
+                // Try to access the remote track - it may be null if not fully subscribed yet
+                val remoteTrack = videoTrackPublication.remoteVideoTrack
+                
+                if (remoteTrack != null) {
+                    Log.d(TAG, "   ✓ Found existing subscribed video track for participant: $participantSid, trackSid: $trackSid")
+                    // Check if we already handled this track to avoid duplicates
+                    if (!remoteVideoViews.containsKey(participantSid)) {
+                        Log.d(TAG, "   Creating VideoView for existing track")
+                        handleRemoteVideoTrack(participant, videoTrackPublication, remoteTrack)
+                    } else {
+                        Log.d(TAG, "   VideoView already exists for participant: $participantSid, skipping")
+                    }
+                } else {
+                    Log.d(TAG, "   ⏳ Video track publication exists but track not available yet for participant: $participantSid")
+                    // Track will be available via onVideoTrackSubscribed callback
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "   ⚠ Error accessing track for participant: $participantSid, error: ${e.message}")
+                // Track will be available via onVideoTrackSubscribed callback
+            }
+        }
+    }
+    
+    // Helper method to set up participant listener (used for both existing and new participants)
+    private fun setupParticipantListener(participant: RemoteParticipant) {
+        val participantSid = participant.sid
+        Log.d(TAG, "Setting up listener for participant: $participantSid")
         participant.setListener(object : RemoteParticipant.Listener {
             override fun onVideoTrackSubscribed(
                 participant: RemoteParticipant,
                 publication: RemoteVideoTrackPublication,
                 remoteVideoTrack: RemoteVideoTrack
             ) {
-                val activityContext = activity ?: context
-                if (activityContext == null) return
-                
-                val remoteView = VideoView(activityContext)
-                remoteVideoTrack.addSink(remoteView)
-                remoteVideoViews[participant.sid] = remoteView
-                remoteVideoTracks[participant.sid] = remoteVideoTrack
-                
-                sendEvent("videoTrackAdded", mapOf(
-                    "track" to mapOf(
-                        "trackSid" to publication.trackSid,
-                        "participantSid" to participant.sid,
-                        "isEnabled" to true
-                    )
-                ))
+                Log.d(TAG, "🎥 onVideoTrackSubscribed called for participant: ${participant.sid}, trackSid: ${publication.trackSid}")
+                handleRemoteVideoTrack(participant, publication, remoteVideoTrack)
             }
 
             override fun onVideoTrackUnsubscribed(
@@ -526,31 +579,153 @@ class TwilioFlutterVideoSdkPlugin :
             override fun onAudioTrackEnabled(
                 participant: RemoteParticipant,
                 publication: RemoteAudioTrackPublication
-            ) {
-                // Optional: handle audio track enabled event
-            }
+            ) {}
             
             override fun onAudioTrackDisabled(
                 participant: RemoteParticipant,
                 publication: RemoteAudioTrackPublication
-            ) {
-                // Optional: handle audio track disabled event
-            }
+            ) {}
             
             override fun onVideoTrackEnabled(
                 participant: RemoteParticipant,
                 publication: RemoteVideoTrackPublication
             ) {
-                // Optional: handle video track enabled event
+                Log.d(TAG, "🎥 Video track enabled for participant: ${participant.sid}, trackSid: ${publication.trackSid}")
+                val participantSid = participant.sid
+                val remoteTrack = publication.remoteVideoTrack
+                
+                if (remoteTrack != null) {
+                    // If we already have a view, reattach the track to it
+                    val existingView = remoteVideoViews[participantSid]
+                    if (existingView != null) {
+                        Log.d(TAG, "   Reattaching track to existing view for participant: $participantSid")
+                        // Remove any old renderer first (in case it was attached to a different track)
+                        val oldTrack = remoteVideoTracks[participantSid]
+                        oldTrack?.removeSink(existingView)
+                        // Clear background color that was set when disabled
+                        existingView.setBackgroundColor(android.graphics.Color.TRANSPARENT)
+                        // Attach new track
+                        remoteTrack.addSink(existingView)
+                        remoteVideoTracks[participantSid] = remoteTrack
+                        
+                        // Send event with isEnabled: true
+                        sendEvent("videoTrackAdded", mapOf(
+                            "track" to mapOf(
+                                "trackSid" to publication.trackSid,
+                                "participantSid" to participantSid,
+                                "isEnabled" to true,
+                                "nativeViewReady" to true
+                            )
+                        ))
+                    } else {
+                        // If we don't have a view yet, create one
+                        handleRemoteVideoTrack(participant, publication, remoteTrack)
+                    }
+                } else {
+                    Log.w(TAG, "   ⚠ Remote track is null for participant: $participantSid")
+                }
             }
             
             override fun onVideoTrackDisabled(
                 participant: RemoteParticipant,
                 publication: RemoteVideoTrackPublication
             ) {
-                // Optional: handle video track disabled event
+                val participantSid = participant.sid
+                Log.d(TAG, "🎥 Video track disabled for participant: $participantSid, trackSid: ${publication.trackSid}")
+                
+                // Remove the renderer from the track to stop rendering and prevent frozen frame
+                val existingView = remoteVideoViews[participantSid]
+                val existingTrack = remoteVideoTracks[participantSid]
+                
+                if (existingView != null && existingTrack != null) {
+                    Log.d(TAG, "   Removing renderer from track to stop video rendering")
+                    existingTrack.removeSink(existingView)
+                    // Clear the view background to show placeholder
+                    existingView.setBackgroundColor(android.graphics.Color.BLACK)
+                }
+                
+                // Send event to Flutter so it can hide the video and show placeholder
+                sendEvent("videoTrackAdded", mapOf(
+                    "track" to mapOf(
+                        "trackSid" to publication.trackSid,
+                        "participantSid" to participantSid,
+                        "isEnabled" to false,
+                        "nativeViewReady" to remoteVideoViews.containsKey(participantSid)
+                    )
+                ))
             }
         })
+    }
+    
+    // Helper method to handle remote video track (used for both existing and newly subscribed tracks)
+    private fun handleRemoteVideoTrack(
+        participant: RemoteParticipant,
+        publication: RemoteVideoTrackPublication,
+        remoteVideoTrack: RemoteVideoTrack
+    ) {
+        Log.d(TAG, "🔧 handleRemoteVideoTrack called for participant: ${participant.sid}, trackSid: ${publication.trackSid}")
+        
+        val activityContext = activity ?: context
+        if (activityContext == null) {
+            Log.e(TAG, "❌ Activity context is null, cannot create VideoView")
+            return
+        }
+        
+        val participantSid = participant.sid
+        
+        // Check if we already have a view for this participant to avoid duplicates
+        if (remoteVideoViews.containsKey(participantSid)) {
+            Log.d(TAG, "⚠️ Video view already exists for participant: $participantSid, skipping creation")
+            return
+        }
+        
+        Log.d(TAG, "✅ Creating VideoView for participant: $participantSid, trackSid: ${publication.trackSid}")
+        
+        try {
+            val remoteView = VideoView(activityContext)
+            remoteVideoTrack.addSink(remoteView)
+            remoteVideoViews[participantSid] = remoteView
+            remoteVideoTracks[participantSid] = remoteVideoTrack
+            
+            Log.d(TAG, "✅ VideoView created and attached for participant: $participantSid")
+            Log.d(TAG, "   Total remote views: ${remoteVideoViews.size}")
+            Log.d(TAG, "   VideoView ID will be: twilio_video_view_$participantSid")
+            
+            // Send event with nativeViewReady flag to ensure Flutter waits for native view
+            sendEvent("videoTrackAdded", mapOf(
+                "track" to mapOf(
+                    "trackSid" to publication.trackSid,
+                    "participantSid" to participantSid,
+                    "isEnabled" to true,
+                    "nativeViewReady" to true  // Flag indicating native VideoView is ready
+                )
+            ))
+            Log.d(TAG, "✅ Sent videoTrackAdded event for participant: $participantSid")
+        } catch (e: Exception) {
+            Log.e(TAG, "❌ Error creating VideoView: ${e.message}", e)
+        }
+    }
+
+    override fun onConnectFailure(room: Room, error: TwilioException) {
+        Log.e(TAG, "Failed to connect to room: ${error.message}")
+        sendEvent("connectionFailure", mapOf("error" to (error.message ?: "Unknown error")))
+    }
+
+    override fun onDisconnected(room: Room, error: TwilioException?) {
+        Log.d(TAG, "Disconnected from room: ${room.name}")
+        sendEvent("disconnected", emptyMap())
+    }
+
+    override fun onParticipantConnected(room: Room, participant: RemoteParticipant) {
+        Log.d(TAG, "Participant connected: ${participant.identity}")
+        
+        // Attach listener to participant using helper method
+        setupParticipantListener(participant)
+        
+        // Check for existing video tracks that are already subscribed when participant connects
+        // This handles the case where tracks are already available
+        Log.d(TAG, "Checking for existing video tracks for new participant...")
+        checkExistingTracksForParticipant(participant)
 
         sendEvent("participantConnected", mapOf(
             "participant" to mapOf(

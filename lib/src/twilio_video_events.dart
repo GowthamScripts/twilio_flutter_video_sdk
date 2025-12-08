@@ -66,11 +66,13 @@ class VideoTrackInfo {
   final String trackSid;
   final String participantSid;
   final bool isEnabled;
+  final bool nativeViewReady;
 
   VideoTrackInfo({
     required this.trackSid,
     required this.participantSid,
     required this.isEnabled,
+    this.nativeViewReady = false,
   });
 
   factory VideoTrackInfo.fromMap(Map<dynamic, dynamic> map) {
@@ -78,6 +80,7 @@ class VideoTrackInfo {
       trackSid: map['trackSid'] as String,
       participantSid: map['participantSid'] as String,
       isEnabled: map['isEnabled'] as bool? ?? false,
+      nativeViewReady: map['nativeViewReady'] as bool? ?? false,
     );
   }
 }

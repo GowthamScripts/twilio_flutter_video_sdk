@@ -14,9 +14,9 @@ public class TwilioFlutterVideoSdkPlugin: NSObject, FlutterPlugin {
     private var camera: CameraSource?
     private var localVideoTrack: LocalVideoTrack?
     private var localAudioTrack: LocalAudioTrack?
-    private var localVideoView: VideoView?
+    fileprivate var localVideoView: VideoView?
     
-    private var remoteVideoViews: [String: VideoView] = [:]
+    fileprivate var remoteVideoViews: [String: VideoView] = [:]
     private var remoteVideoTracks: [String: RemoteVideoTrack] = [:]
     
     private var isAudioEnabled = true
@@ -174,15 +174,26 @@ public class TwilioFlutterVideoSdkPlugin: NSObject, FlutterPlugin {
         guard let videoTrack = localVideoTrack else { return }
         
         let videoView = VideoView(frame: CGRect(x: 0, y: 0, width: 300, height: 400))
+        videoView.contentMode = .scaleAspectFill
+        videoView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         videoTrack.addRenderer(videoView)
         localVideoView = videoView
+        
+        print("✅ TwilioVideoPlugin: Local video view created and attached")
     }
     
     func getVideoView(for viewId: String) -> VideoView? {
         if viewId == "0" {
             return localVideoView
         } else {
-            return remoteVideoViews[viewId]
+            let view = remoteVideoViews[viewId]
+            if view == nil {
+                print("⚠️ TwilioVideoPlugin: VideoView not found for viewId: \(viewId)")
+                print("   Available remote views: \(Array(remoteVideoViews.keys))")
+            } else {
+                print("✅ TwilioVideoPlugin: Found VideoView for viewId: \(viewId)")
+            }
+            return view
         }
     }
     
@@ -251,10 +262,92 @@ extension TwilioFlutterVideoSdkPlugin: FlutterStreamHandler {
     }
 }
 
+// MARK: - RemoteParticipantDelegate
+extension TwilioFlutterVideoSdkPlugin: RemoteParticipantDelegate {
+    public func didSubscribeToVideoTrack(videoTrack: RemoteVideoTrack, publication: RemoteVideoTrackPublication, participant: RemoteParticipant) {
+        let participantSid = participant.sid ?? ""
+        let trackSid = publication.trackSid ?? ""
+        
+        print("📹 TwilioVideoPlugin: didSubscribeToVideoTrack for participant: \(participantSid), trackSid: \(trackSid)")
+        
+        // Handle the subscribed video track
+        handleRemoteVideoTrack(participant: participant, videoTrack: publication, remoteTrack: videoTrack)
+    }
+    
+    public func didUnsubscribeFromVideoTrack(videoTrack: RemoteVideoTrack, publication: RemoteVideoTrackPublication, participant: RemoteParticipant) {
+        let participantSid = participant.sid ?? ""
+        let trackSid = publication.trackSid ?? ""
+        
+        print("📹 TwilioVideoPlugin: didUnsubscribeFromVideoTrack for participant: \(participantSid)")
+        
+        // Remove remote video view
+        if let remoteView = remoteVideoViews.removeValue(forKey: participantSid) {
+            remoteView.removeFromSuperview()
+        }
+        remoteVideoTracks.removeValue(forKey: participantSid)
+        
+        sendEvent(event: "videoTrackRemoved", data: [
+            "track": [
+                "trackSid": trackSid,
+                "participantSid": participantSid,
+                "isEnabled": false
+            ]
+        ])
+    }
+    
+    public func didSubscribeToAudioTrack(audioTrack: RemoteAudioTrack, publication: RemoteAudioTrackPublication, participant: RemoteParticipant) {
+        let participantSid = participant.sid ?? ""
+        sendEvent(event: "audioTrackAdded", data: [
+            "participantSid": participantSid
+        ])
+    }
+    
+    public func didUnsubscribeFromAudioTrack(audioTrack: RemoteAudioTrack, publication: RemoteAudioTrackPublication, participant: RemoteParticipant) {
+        let participantSid = participant.sid ?? ""
+        sendEvent(event: "audioTrackRemoved", data: [
+            "participantSid": participantSid
+        ])
+    }
+}
+
 // MARK: - RoomDelegate
 extension TwilioFlutterVideoSdkPlugin: RoomDelegate {
     public func roomDidConnect(room: Room) {
-        sendEvent(event: "connected", data: ["roomName": room.name])
+        // Store room reference
+        self.room = room
+        
+        print("🏠 TwilioVideoPlugin: Room connected: \(room.name ?? "unknown")")
+        print("   Total remote participants: \(room.remoteParticipants.count)")
+        
+        // When we join a room, check for existing participants who may already have video tracks
+        // This handles the case where remote participants joined before us
+        for participant in room.remoteParticipants {
+            let participantSid = participant.sid ?? ""
+            print("📱 TwilioVideoPlugin: Found existing participant: \(participant.identity ?? ""), SID: \(participantSid)")
+            
+            // Set delegate on existing participant to receive track events
+            participant.delegate = self
+            
+            // Check for already-subscribed video tracks
+            print("📹 TwilioVideoPlugin: Checking existing participant's video tracks...")
+            print("   Total remoteVideoTracks: \(participant.remoteVideoTracks.count)")
+            
+            for videoTrackPublication in participant.remoteVideoTracks {
+                let trackName = videoTrackPublication.trackName
+                print("   Track: \(trackName), isSubscribed: \(videoTrackPublication.isTrackSubscribed)")
+                if let remoteTrack = videoTrackPublication.remoteTrack, videoTrackPublication.isTrackSubscribed {
+                    print("📹 TwilioVideoPlugin: Found existing subscribed video track for participant: \(participantSid)")
+                    // Handle the existing track
+                    handleRemoteVideoTrack(participant: participant, videoTrack: videoTrackPublication, remoteTrack: remoteTrack)
+                } else if videoTrackPublication.isTrackSubscribed {
+                    print("📹 TwilioVideoPlugin: Track is subscribed but remoteTrack is nil for participant: \(participantSid)")
+                } else {
+                    print("📹 TwilioVideoPlugin: Video track exists but not subscribed yet for participant: \(participantSid)")
+                }
+            }
+        }
+        
+        sendEvent(event: "connected", data: ["roomName": room.name ?? ""])
     }
     
     public func roomDidFailToConnect(room: Room, error: Error) {
@@ -277,6 +370,31 @@ extension TwilioFlutterVideoSdkPlugin: RoomDelegate {
         let participantSid = participant.sid ?? ""
         let participantIdentity = participant.identity ?? ""
         
+        print("📱 TwilioVideoPlugin: Participant connected: \(participantIdentity), SID: \(participantSid)")
+        
+        // Set delegate on participant to receive track subscription events
+        participant.delegate = self
+        
+        // Check for existing video tracks that are already published when participant connects
+        // In Twilio Video SDK, tracks might already be available when participantDidConnect is called
+        print("📹 TwilioVideoPlugin: Checking for existing video tracks...")
+        print("   Total remoteVideoTracks: \(participant.remoteVideoTracks.count)")
+        
+        // Iterate over remoteVideoTracks (it's a collection, not a dictionary in SDK 5.x)
+        for videoTrackPublication in participant.remoteVideoTracks {
+            let trackName = videoTrackPublication.trackName
+            print("   Track: \(trackName), isSubscribed: \(videoTrackPublication.isTrackSubscribed)")
+            if let remoteTrack = videoTrackPublication.remoteTrack, videoTrackPublication.isTrackSubscribed {
+                print("📹 TwilioVideoPlugin: Found existing subscribed video track for participant: \(participantSid)")
+                // Handle the existing track as if it was just enabled
+                handleRemoteVideoTrack(participant: participant, videoTrack: videoTrackPublication, remoteTrack: remoteTrack)
+            } else if videoTrackPublication.isTrackSubscribed {
+                print("📹 TwilioVideoPlugin: Track is subscribed but remoteTrack is nil for participant: \(participantSid)")
+            } else {
+                print("📹 TwilioVideoPlugin: Video track exists but not subscribed yet for participant: \(participantSid)")
+            }
+        }
+        
         sendEvent(event: "participantConnected", data: [
             "participant": [
                 "sid": participantSid,
@@ -287,15 +405,68 @@ extension TwilioFlutterVideoSdkPlugin: RoomDelegate {
         ])
     }
     
+    // Helper method to handle remote video track (used for both existing and newly enabled tracks)
+    private func handleRemoteVideoTrack(participant: RemoteParticipant, videoTrack: RemoteVideoTrackPublication, remoteTrack: RemoteVideoTrack) {
+        let participantSid = participant.sid ?? ""
+        let trackSid = videoTrack.trackSid ?? ""
+        
+        // Check if we already have a view for this participant to avoid duplicates
+        if remoteVideoViews[participantSid] != nil {
+            print("📹 TwilioVideoPlugin: Video view already exists for participant: \(participantSid), skipping creation")
+            return
+        }
+        
+        print("📹 TwilioVideoPlugin: Creating video view for participant: \(participantSid), trackSid: \(trackSid)")
+        
+        // Create video view for remote participant with proper configuration
+        let remoteView = VideoView(frame: CGRect(x: 0, y: 0, width: 300, height: 400))
+        remoteView.contentMode = .scaleAspectFill
+        remoteView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        
+        // Attach the remote track to the video view
+        remoteTrack.addRenderer(remoteView)
+        
+        // Store references to prevent deallocation
+        remoteVideoViews[participantSid] = remoteView
+        remoteVideoTracks[participantSid] = remoteTrack
+        
+        print("✅ TwilioVideoPlugin: Video view created and attached for participant: \(participantSid)")
+        print("   Total remote views: \(remoteVideoViews.count)")
+        print("   VideoView frame: \(remoteView.frame)")
+        
+        // Remote video view is now available via factory
+        // Send event with nativeViewReady flag to ensure Flutter waits for native view
+        sendEvent(event: "videoTrackAdded", data: [
+            "track": [
+                "trackSid": trackSid,
+                "participantSid": participantSid,
+                "isEnabled": true,
+                "nativeViewReady": true  // Flag indicating native VideoView is ready
+            ]
+        ])
+    }
+    
     public func participantDidDisconnect(room: Room, participant: RemoteParticipant) {
         let participantSid = participant.sid ?? ""
         let participantIdentity = participant.identity ?? ""
         
         // Clean up remote video view
+        let hadVideoView = remoteVideoViews[participantSid] != nil
         if let remoteView = remoteVideoViews.removeValue(forKey: participantSid) {
             remoteView.removeFromSuperview()
         }
         remoteVideoTracks.removeValue(forKey: participantSid)
+        
+        // If there was a video view, notify Flutter to remove the PlatformView
+        if hadVideoView {
+            sendEvent(event: "videoTrackRemoved", data: [
+                "track": [
+                    "trackSid": "",
+                    "participantSid": participantSid,
+                    "isEnabled": false
+                ]
+            ])
+        }
         
         sendEvent(event: "participantDisconnected", data: [
             "participant": [
@@ -308,43 +479,65 @@ extension TwilioFlutterVideoSdkPlugin: RoomDelegate {
     }
     
     public func participant(participant: RemoteParticipant, didEnableVideoTrack videoTrack: RemoteVideoTrackPublication) {
-        guard let remoteTrack = videoTrack.remoteTrack else { return }
+        guard let remoteTrack = videoTrack.remoteTrack else { 
+            print("⚠️ TwilioVideoPlugin: didEnableVideoTrack but remoteTrack is nil")
+            return 
+        }
         
         let participantSid = participant.sid ?? ""
-        let trackSid = videoTrack.trackSid ?? ""
+        print("📹 TwilioVideoPlugin: didEnableVideoTrack called for participant: \(participantSid)")
         
-        // Create video view for remote participant
-        let remoteView = VideoView(frame: CGRect(x: 0, y: 0, width: 300, height: 400))
-        remoteTrack.addRenderer(remoteView)
-        remoteVideoViews[participantSid] = remoteView
-        remoteVideoTracks[participantSid] = remoteTrack
-        
-        // Remote video view is now available via factory
-        
-        sendEvent(event: "videoTrackAdded", data: [
-            "track": [
-                "trackSid": trackSid,
-                "participantSid": participantSid,
-                "isEnabled": true
-            ]
-        ])
+        // If we already have a view, just reattach the track
+        if let existingView = remoteVideoViews[participantSid] {
+            print("📹 TwilioVideoPlugin: Reattaching track to existing view for participant: \(participantSid)")
+            // Remove any old renderer first (in case it was attached to a different track)
+            if let oldTrack = remoteVideoTracks[participantSid] {
+                oldTrack.removeRenderer(existingView)
+            }
+            // Clear background color that was set when disabled
+            existingView.backgroundColor = .clear
+            // Attach new track
+            remoteTrack.addRenderer(existingView)
+            remoteVideoTracks[participantSid] = remoteTrack
+            
+            // Send event with isEnabled: true
+            sendEvent(event: "videoTrackAdded", data: [
+                "track": [
+                    "trackSid": videoTrack.trackSid ?? "",
+                    "participantSid": participantSid,
+                    "isEnabled": true,
+                    "nativeViewReady": true
+                ]
+            ])
+        } else {
+            // Create new view if we don't have one
+            handleRemoteVideoTrack(participant: participant, videoTrack: videoTrack, remoteTrack: remoteTrack)
+        }
     }
     
     public func participant(participant: RemoteParticipant, didDisableVideoTrack videoTrack: RemoteVideoTrackPublication) {
         let participantSid = participant.sid ?? ""
         let trackSid = videoTrack.trackSid ?? ""
         
-        // Remove remote video view
-        if let remoteView = remoteVideoViews.removeValue(forKey: participantSid) {
-            remoteView.removeFromSuperview()
-        }
-        remoteVideoTracks.removeValue(forKey: participantSid)
+        print("📹 TwilioVideoPlugin: didDisableVideoTrack for participant: \(participantSid)")
         
-        sendEvent(event: "videoTrackRemoved", data: [
+        // Remove the renderer from the track to stop rendering and prevent frozen frame
+        if let existingView = remoteVideoViews[participantSid],
+           let existingTrack = remoteVideoTracks[participantSid] {
+            print("📹 TwilioVideoPlugin: Removing renderer from track to stop video rendering")
+            existingTrack.removeRenderer(existingView)
+            // Clear the view background to show placeholder
+            existingView.backgroundColor = .black
+        }
+        
+        // Send event to Flutter so it can hide the video and show placeholder
+        // Don't remove the view - keep it for reattaching when video is enabled again
+        sendEvent(event: "videoTrackAdded", data: [
             "track": [
                 "trackSid": trackSid,
                 "participantSid": participantSid,
-                "isEnabled": false
+                "isEnabled": false,
+                "nativeViewReady": remoteVideoViews[participantSid] != nil
             ]
         ])
     }
@@ -408,6 +601,12 @@ class TwilioVideoViewFactory: NSObject, FlutterPlatformViewFactory {
             viewIdString = id
         }
         
+        print("🏭 TwilioVideoViewFactory: Creating PlatformView with viewId: '\(viewIdString)'")
+        if let plugin = plugin {
+            print("   Available local view: \(plugin.localVideoView != nil ? "YES" : "NO")")
+            print("   Available remote views: \(Array(plugin.remoteVideoViews.keys))")
+        }
+        
         return TwilioVideoPlatformView(frame: frame, viewId: viewIdString, plugin: plugin)
     }
     
@@ -421,6 +620,7 @@ class TwilioVideoPlatformView: NSObject, FlutterPlatformView {
     private var frame: CGRect
     private var viewId: String
     private weak var plugin: TwilioFlutterVideoSdkPlugin?
+    private var containerView: UIView?
     
     init(frame: CGRect, viewId: String, plugin: TwilioFlutterVideoSdkPlugin?) {
         self.frame = frame
@@ -430,15 +630,76 @@ class TwilioVideoPlatformView: NSObject, FlutterPlatformView {
     }
     
     func view() -> UIView {
-        // Get the actual VideoView from the plugin
-        if let videoView = plugin?.getVideoView(for: viewId) {
-            videoView.frame = frame
-            return videoView
+        print("📺 TwilioVideoPlatformView.view() called for viewId: '\(viewId)'")
+        print("   Initial frame: \(frame)")
+        
+        // Use the frame provided, but fallback to a default if it's zero
+        // This ensures the container always has a visible size
+        let containerFrame: CGRect
+        if frame.width > 0 && frame.height > 0 {
+            containerFrame = frame
+        } else {
+            // Default size if frame is zero (common when Flutter hasn't laid out yet)
+            containerFrame = CGRect(x: 0, y: 0, width: 300, height: 400)
+            print("   ⚠️ Frame was zero, using default: \(containerFrame)")
         }
         
-        // Return placeholder if view not ready yet
-        let placeholder = UIView(frame: frame)
-        placeholder.backgroundColor = .black
-        return placeholder
+        // Create a container view that will hold the VideoView
+        let container = UIView(frame: containerFrame)
+        container.backgroundColor = .black
+        container.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        container.clipsToBounds = true
+        self.containerView = container
+        
+        print("   Container frame: \(container.frame)")
+        
+        // Get the actual VideoView from the plugin
+        if let videoView = plugin?.getVideoView(for: viewId) {
+            print("✅ TwilioVideoPlatformView: Found VideoView for viewId: '\(viewId)'")
+            print("   VideoView original frame: \(videoView.frame)")
+            
+            // Configure the video view to fill the container
+            videoView.frame = container.bounds
+            videoView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+            videoView.contentMode = .scaleAspectFill
+            
+            // Remove from any previous parent to avoid conflicts
+            videoView.removeFromSuperview()
+            
+            // Add the video view to the container
+            container.addSubview(videoView)
+            
+            // Ensure the view is properly laid out
+            videoView.setNeedsLayout()
+            videoView.layoutIfNeeded()
+            container.setNeedsLayout()
+            container.layoutIfNeeded()
+            
+            print("✅ TwilioVideoPlatformView: VideoView added to container")
+            print("   Final VideoView frame: \(videoView.frame)")
+            print("   Final Container frame: \(container.frame)")
+        } else {
+            print("⚠️ TwilioVideoPlatformView: VideoView not found for viewId: '\(viewId)'")
+            if let plugin = plugin {
+                print("   Available remote views: \(Array(plugin.remoteVideoViews.keys))")
+                print("   Local view exists: \(plugin.localVideoView != nil)")
+            }
+            // Show placeholder with label
+            let placeholder = UIView(frame: container.bounds)
+            placeholder.backgroundColor = .black
+            placeholder.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+            
+            let label = UILabel(frame: container.bounds)
+            label.text = "Waiting for video...\n(viewId: \(viewId))"
+            label.textColor = .white
+            label.textAlignment = .center
+            label.numberOfLines = 0
+            label.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+            placeholder.addSubview(label)
+            
+            container.addSubview(placeholder)
+        }
+        
+        return container
     }
 }

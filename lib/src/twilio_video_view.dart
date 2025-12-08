@@ -33,6 +33,9 @@ class TwilioVideoView extends StatelessWidget {
         ),
       );
     } else if (defaultTargetPlatform == TargetPlatform.iOS) {
+      // iOS PlatformView needs explicit sizing to avoid zero frame
+      // If width/height are null, the SizedBox will use constraints from parent
+      // The iOS side will handle zero frames with a default size fallback
       return SizedBox(
         width: width,
         height: height,

@@ -32,7 +32,7 @@ class VideoRoomScreen extends StatefulWidget {
 
 class _VideoRoomScreenState extends State<VideoRoomScreen> {
   final TextEditingController _accessTokenController = TextEditingController();
-  final TextEditingController _roomNameController = TextEditingController();
+  final TextEditingController _roomNameController = TextEditingController(text: 'APT-692D5652CECD7');
   final TwilioVideoController _videoController = TwilioVideoController();
   
   TwilioVideoRoom? _room;
@@ -106,13 +106,9 @@ class _VideoRoomScreenState extends State<VideoRoomScreen> {
       });
 
       _participantSubscription = _room!.participantEvents.listen((participant) {
-        setState(() {
-          if (_isConnected) {
-            _remoteParticipantSids.add(participant.sid);
-          } else {
-            _remoteParticipantSids.remove(participant.sid);
-          }
-        });
+        print('📱 Participant event: ${participant.identity}, SID: ${participant.sid}, isConnected: $_isConnected');
+        // Don't add to _remoteParticipantSids here - wait for videoTrackAdded event
+        // This ensures the native VideoView exists before Flutter creates PlatformView
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('Participant ${participant.identity} ${_isConnected ? "connected" : "disconnected"}'),
@@ -121,13 +117,24 @@ class _VideoRoomScreenState extends State<VideoRoomScreen> {
         );
       });
       
-      // Listen to video track events to track participant SIDs
+      // Listen to video track events - ONLY add participantSid when video track is actually added
+      // AND native VideoView is ready. This ensures the native VideoView exists before Flutter 
+      // tries to create PlatformView, preventing "Waiting for video..." placeholders.
       _videoTrackSubscription = _room!.videoTrackEvents.listen((track) {
+        print('🎥 Video track event: participantSid=${track.participantSid}, enabled=${track.isEnabled}, trackSid=${track.trackSid}, nativeViewReady=${track.nativeViewReady}');
         setState(() {
-          if (track.isEnabled) {
-            _remoteParticipantSids.add(track.participantSid);
+          if (track.isEnabled && track.nativeViewReady) {
+            // Only add when track is enabled AND native view is ready
+            // This ensures the native VideoView exists before Flutter creates PlatformView
+            if (!_remoteParticipantSids.contains(track.participantSid)) {
+              _remoteParticipantSids.add(track.participantSid);
+              print('✅ Added remote participant with video (native view ready): ${track.participantSid}, total: ${_remoteParticipantSids.length}');
+            }
           } else {
-            _remoteParticipantSids.remove(track.participantSid);
+            // Remove when track is disabled, removed, or native view not ready
+            if (_remoteParticipantSids.remove(track.participantSid)) {
+              print('❌ Removed remote participant video: ${track.participantSid}, total: ${_remoteParticipantSids.length}');
+            }
           }
         });
       });
@@ -372,6 +379,23 @@ class _VideoRoomScreenState extends State<VideoRoomScreen> {
               const SizedBox(height: 16),
               
               // Remote video views
+              // IMPORTANT: Only create PlatformViews AFTER receiving videoTrackAdded event
+              // This ensures the native VideoView exists before Flutter tries to access it.
+              // 
+              // Flow:
+              // 1. Participant connects -> participantConnected event (don't create view yet)
+              // 2. Participant enables video -> didEnableVideoTrack (iOS) creates VideoView
+              // 3. Native sends videoTrackAdded event -> Flutter adds participantSid to set
+              // 4. Flutter rebuilds -> Creates TwilioVideoView widget -> PlatformView created
+              // 5. PlatformView factory retrieves VideoView from native (now it exists!)
+              // 
+              // Debug: Check console logs for:
+              // - "Video track event" - confirms track events are received
+              // - "Added remote participant with video" - confirms participantSid is added
+              // - "Creating TwilioVideoView widget" - confirms Flutter widget is created
+              // - "Creating PlatformView" (iOS) - confirms native PlatformView is created
+              // - "Found VideoView" (iOS) - confirms native VideoView is found
+              // - "VideoView not found" (iOS) - means viewId mismatch or timing issue
               if (_remoteParticipantSids.isNotEmpty) ...[
                 Text(
                   'Remote Participants (${_remoteParticipantSids.length})',
@@ -390,19 +414,59 @@ class _VideoRoomScreenState extends State<VideoRoomScreen> {
                   itemCount: _remoteParticipantSids.length,
                   itemBuilder: (context, index) {
                     final participantSid = _remoteParticipantSids.elementAt(index);
+                    print('🎥 Creating TwilioVideoView widget for participant SID: $participantSid (index: $index)');
+                    print('   Total remote participants: ${_remoteParticipantSids.length}');
+                    print('   All participant SIDs: ${_remoteParticipantSids.toList()}');
                     return Card(
                       child: ClipRRect(
                         borderRadius: BorderRadius.circular(8),
-                        child: TwilioVideoView(
-                          viewId: participantSid,
-                          width: double.infinity,
-                          height: double.infinity,
+                        child: Stack(
+                          children: [
+                            TwilioVideoView(
+                              viewId: participantSid,
+                              width: double.infinity,
+                              height: double.infinity,
+                            ),
+                            // Debug overlay showing participant SID
+                            Positioned(
+                              bottom: 4,
+                              left: 4,
+                              right: 4,
+                              child: Container(
+                                padding: const EdgeInsets.all(4),
+                                decoration: BoxDecoration(
+                                  color: Colors.black54,
+                                  borderRadius: BorderRadius.circular(4),
+                                ),
+                                child: Text(
+                                  'SID: ${participantSid.substring(0, participantSid.length > 20 ? 20 : participantSid.length)}...',
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 10,
+                                  ),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                            ),
+                          ],
                         ),
                       ),
                     );
                   },
                 ),
                 const SizedBox(height: 16),
+              ] else if (_isConnected) ...[
+                // Show placeholder while waiting for remote participants
+                const Padding(
+                  padding: EdgeInsets.all(16.0),
+                  child: Center(
+                    child: Text(
+                      'Waiting for remote participants...',
+                      style: TextStyle(color: Colors.grey),
+                    ),
+                  ),
+                ),
               ],
               
               const Divider(),

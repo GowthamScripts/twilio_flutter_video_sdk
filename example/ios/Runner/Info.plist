@@ -45,11 +45,11 @@
 	<true/>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
-	<key>NSCameraUsageDescription</key>
-	<string>This app needs access to the camera for video calls</string>
-	<key>NSMicrophoneUsageDescription</key>
-	<string>This app needs access to the microphone for video calls</string>
 	<key>io.flutter.embedded_views_preview</key>
 	<true/>
+	<key>NSCameraUsageDescription</key>
+    <string>This app needs access to the camera for video calls</string>
+    <key>NSMicrophoneUsageDescription</key>
+    <string>This app needs access to the microphone for video calls</string>
 </dict>
 </plist>

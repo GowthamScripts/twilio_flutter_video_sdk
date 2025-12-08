@@ -18,19 +18,756 @@ class MyApp extends StatelessWidget {
         primarySwatch: Colors.blue,
         useMaterial3: true,
       ),
-      home: const VideoRoomScreen(),
+      home: const HomeScreen(),
     );
   }
 }
 
-class VideoRoomScreen extends StatefulWidget {
-  const VideoRoomScreen({super.key});
+/// Home screen with example options
+class HomeScreen extends StatelessWidget {
+  const HomeScreen({super.key});
 
   @override
-  State<VideoRoomScreen> createState() => _VideoRoomScreenState();
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Twilio Video SDK Examples'),
+        backgroundColor: Theme.of(context).colorScheme.inversePrimary,
+      ),
+      body: ListView(
+        padding: const EdgeInsets.all(16.0),
+        children: [
+          const Text(
+            'Choose an example to try:',
+            style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+          ),
+          const SizedBox(height: 24),
+          
+          // Example 1: Ready-to-use VideoRoomScreen
+          Card(
+            child: ListTile(
+              leading: const Icon(Icons.video_call, size: 40),
+              title: const Text('Example 1: Ready-to-Use VideoRoomScreen'),
+              subtitle: const Text('Simplest way - just pass token and room name'),
+              trailing: const Icon(Icons.arrow_forward_ios),
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => const SimpleVideoRoomExample(),
+                  ),
+                );
+              },
+            ),
+          ),
+          const SizedBox(height: 16),
+          
+          // Example 2: Custom VideoRoomScreen
+          Card(
+            child: ListTile(
+              leading: const Icon(Icons.tune, size: 40),
+              title: const Text('Example 2: Custom VideoRoomScreen'),
+              subtitle: const Text('Customize UI with builder functions'),
+              trailing: const Icon(Icons.arrow_forward_ios),
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => const CustomVideoRoomExample(),
+                  ),
+                );
+              },
+            ),
+          ),
+          const SizedBox(height: 16),
+          
+          // Example 3: Manual Implementation
+          Card(
+            child: ListTile(
+              leading: const Icon(Icons.code, size: 40),
+              title: const Text('Example 3: Manual Implementation'),
+              subtitle: const Text('Full control - build your own UI'),
+              trailing: const Icon(Icons.arrow_forward_ios),
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => const ManualVideoRoomExample(),
+                  ),
+                );
+              },
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 }
 
-class _VideoRoomScreenState extends State<VideoRoomScreen> {
+/// Example 1: Simple usage with ready-to-use VideoRoomScreen
+class SimpleVideoRoomExample extends StatefulWidget {
+  const SimpleVideoRoomExample({super.key});
+
+  @override
+  State<SimpleVideoRoomExample> createState() => _SimpleVideoRoomExampleState();
+}
+
+class _SimpleVideoRoomExampleState extends State<SimpleVideoRoomExample> {
+  final TextEditingController _tokenController = TextEditingController();
+  final TextEditingController _roomController = TextEditingController(text: 'APT-692D5652CECD7');
+  bool _hasPermissions = false;
+  bool _isRequestingPermissions = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _requestPermissions();
+  }
+
+  @override
+  void dispose() {
+    _tokenController.dispose();
+    _roomController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _requestPermissions() async {
+    // Prevent multiple simultaneous requests
+    if (_isRequestingPermissions) {
+      print('⏳ [Example 1] Permission request already in progress');
+      return;
+    }
+    
+    try {
+      _isRequestingPermissions = true;
+      print('📱 [Example 1] Requesting permissions...');
+      
+      // Check current status first
+      final cameraStatus = await Permission.camera.status;
+      final microphoneStatus = await Permission.microphone.status;
+      
+      print('📱 [Example 1] Camera status: $cameraStatus');
+      print('📱 [Example 1] Microphone status: $microphoneStatus');
+      
+      // If already granted, update state
+      if (cameraStatus.isGranted && microphoneStatus.isGranted) {
+        print('✅ [Example 1] Permissions already granted');
+        if (mounted) {
+          setState(() {
+            _hasPermissions = true;
+          });
+        }
+        return;
+      }
+      
+      // Request permissions one by one for better iOS compatibility
+      print('📱 [Example 1] Requesting camera permission...');
+      final cameraResult = await Permission.camera.request();
+      print('📱 [Example 1] Camera permission result: $cameraResult');
+      
+      print('📱 [Example 1] Requesting microphone permission...');
+      final micResult = await Permission.microphone.request();
+      print('📱 [Example 1] Microphone permission result: $micResult');
+      
+      // Check final status
+      final finalCameraStatus = await Permission.camera.status;
+      final finalMicStatus = await Permission.microphone.status;
+      
+      print('📱 [Example 1] Final camera status: $finalCameraStatus');
+      print('📱 [Example 1] Final microphone status: $finalMicStatus');
+      
+      if (mounted) {
+        final granted = finalCameraStatus.isGranted && finalMicStatus.isGranted;
+        setState(() {
+          _hasPermissions = granted;
+        });
+        
+        print('📱 [Example 1] Permissions granted: $granted');
+        
+        // Use request result to check for permanently denied (more reliable on iOS)
+        final cameraPermanentlyDenied = cameraResult.isPermanentlyDenied || finalCameraStatus.isPermanentlyDenied;
+        final micPermanentlyDenied = micResult.isPermanentlyDenied || finalMicStatus.isPermanentlyDenied;
+        
+        print('📱 [Example 1] Camera permanently denied: $cameraPermanentlyDenied (result: ${cameraResult.isPermanentlyDenied}, status: ${finalCameraStatus.isPermanentlyDenied})');
+        print('📱 [Example 1] Microphone permanently denied: $micPermanentlyDenied (result: ${micResult.isPermanentlyDenied}, status: ${finalMicStatus.isPermanentlyDenied})');
+        
+        // If denied permanently, show message
+        if (!granted) {
+          if (cameraPermanentlyDenied || micPermanentlyDenied) {
+            if (mounted) {
+              showDialog(
+                context: context,
+                builder: (context) => AlertDialog(
+                  title: const Text('Permissions Required'),
+                  content: SingleChildScrollView(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          'Camera and microphone permissions are required for video calls.',
+                          style: TextStyle(fontWeight: FontWeight.bold),
+                        ),
+                        const SizedBox(height: 16),
+                        const Text('To enable permissions:'),
+                        const SizedBox(height: 8),
+                        const Text('1. Tap "Open Settings" below'),
+                        const Text('2. Go to Privacy & Security'),
+                        const Text('3. Tap Camera or Microphone'),
+                        const Text('4. Find "Twilio Flutter Video Sdk" and enable it'),
+                        const SizedBox(height: 16),
+                        const Text(
+                          'If you don\'t see this app in Settings:',
+                          style: TextStyle(fontWeight: FontWeight.bold),
+                        ),
+                        const SizedBox(height: 8),
+                        const Text(
+                          '• Delete and reinstall the app\n'
+                          '• Then grant permissions when prompted',
+                          style: TextStyle(fontSize: 12, color: Colors.grey),
+                        ),
+                      ],
+                    ),
+                  ),
+                  actions: [
+                    TextButton(
+                      onPressed: () => Navigator.pop(context),
+                      child: const Text('Cancel'),
+                    ),
+                    TextButton(
+                      onPressed: () {
+                        Navigator.pop(context);
+                        openAppSettings();
+                      },
+                      child: const Text('Open Settings'),
+                    ),
+                  ],
+                ),
+              );
+            }
+          } else {
+            // Show message if denied but not permanently
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Permissions were denied. Please grant camera and microphone access.'),
+                duration: Duration(seconds: 3),
+              ),
+            );
+          }
+        }
+      }
+    } catch (e) {
+      print('❌ [Example 1] Error requesting permissions: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error requesting permissions: $e'),
+            duration: const Duration(seconds: 3),
+          ),
+        );
+      }
+    } finally {
+      _isRequestingPermissions = false;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (!_hasPermissions) {
+      return Scaffold(
+        appBar: AppBar(title: const Text('Example 1: Simple VideoRoomScreen')),
+        body: Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const Icon(Icons.camera_alt, size: 64, color: Colors.grey),
+              const SizedBox(height: 16),
+              const Text(
+                'Camera and Microphone Permissions Required',
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 8),
+              const Padding(
+                padding: EdgeInsets.symmetric(horizontal: 32.0),
+                child: Text(
+                  'This app needs access to your camera and microphone for video calls.',
+                  textAlign: TextAlign.center,
+                ),
+              ),
+              const SizedBox(height: 24),
+              ElevatedButton.icon(
+                onPressed: _requestPermissions,
+                icon: const Icon(Icons.lock_open),
+                label: const Text('Grant Permissions'),
+                style: ElevatedButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Example 1: Simple VideoRoomScreen'),
+      ),
+      body: SingleChildScrollView(
+        padding: const EdgeInsets.all(16.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Card(
+              color: Colors.green.shade50,
+              child: const Padding(
+                padding: EdgeInsets.all(16.0),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'This example shows the simplest way to use the plugin:',
+                      style: TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                    SizedBox(height: 8),
+                    Text('• Just pass access token and room name'),
+                    Text('• All UI and controls are built-in'),
+                    Text('• Perfect for quick prototyping'),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 24),
+            TextField(
+              controller: _tokenController,
+              decoration: const InputDecoration(
+                labelText: 'Access Token',
+                hintText: 'Enter your Twilio access token',
+                border: OutlineInputBorder(),
+              ),
+            ),
+            const SizedBox(height: 16),
+            TextField(
+              controller: _roomController,
+              decoration: const InputDecoration(
+                labelText: 'Room Name',
+                hintText: 'Enter room name',
+                border: OutlineInputBorder(),
+              ),
+            ),
+            const SizedBox(height: 24),
+            ElevatedButton(
+              onPressed: () {
+                if (_tokenController.text.isEmpty || _roomController.text.isEmpty) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Please enter token and room name')),
+                  );
+                  return;
+                }
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => VideoRoomScreen(
+                      options: VideoRoomScreenOptions(
+                        accessToken: _tokenController.text,
+                        roomName: _roomController.text,
+                        enableAudio: true,
+                        enableVideo: true,
+                        enableFrontCamera: true,
+                        onConnected: () {
+                          print('✅ Connected to room!');
+                        },
+                        onDisconnected: () {
+                          print('❌ Disconnected from room');
+                          Navigator.pop(context);
+                        },
+                        onConnectionFailure: (error) {
+                          print('❌ Connection failed: $error');
+                        },
+                      ),
+                    ),
+                  ),
+                );
+              },
+              style: ElevatedButton.styleFrom(
+                padding: const EdgeInsets.symmetric(vertical: 16),
+              ),
+              child: const Text('Join Room'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Example 2: Custom VideoRoomScreen with custom builders
+class CustomVideoRoomExample extends StatefulWidget {
+  const CustomVideoRoomExample({super.key});
+
+  @override
+  State<CustomVideoRoomExample> createState() => _CustomVideoRoomExampleState();
+}
+
+class _CustomVideoRoomExampleState extends State<CustomVideoRoomExample> {
+  final TextEditingController _tokenController = TextEditingController();
+  final TextEditingController _roomController = TextEditingController(text: 'APT-692D5652CECD7');
+  bool _hasPermissions = false;
+  bool _isRequestingPermissions = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _requestPermissions();
+  }
+
+  @override
+  void dispose() {
+    _tokenController.dispose();
+    _roomController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _requestPermissions() async {
+    // Prevent multiple simultaneous requests
+    if (_isRequestingPermissions) {
+      print('⏳ [Example 2] Permission request already in progress');
+      return;
+    }
+    
+    try {
+      _isRequestingPermissions = true;
+      print('📱 [Example 2] Requesting permissions...');
+      
+      // Check current status first
+      final cameraStatus = await Permission.camera.status;
+      final microphoneStatus = await Permission.microphone.status;
+      
+      print('📱 [Example 2] Camera status: $cameraStatus');
+      print('📱 [Example 2] Microphone status: $microphoneStatus');
+      
+      // If already granted, update state
+      if (cameraStatus.isGranted && microphoneStatus.isGranted) {
+        print('✅ [Example 2] Permissions already granted');
+        if (mounted) {
+          setState(() {
+            _hasPermissions = true;
+          });
+        }
+        return;
+      }
+      
+      // Request permissions one by one for better iOS compatibility
+      print('📱 [Example 2] Requesting camera permission...');
+      final cameraResult = await Permission.camera.request();
+      print('📱 [Example 2] Camera permission result: $cameraResult');
+      
+      print('📱 [Example 2] Requesting microphone permission...');
+      final micResult = await Permission.microphone.request();
+      print('📱 [Example 2] Microphone permission result: $micResult');
+      
+      // Check final status
+      final finalCameraStatus = await Permission.camera.status;
+      final finalMicStatus = await Permission.microphone.status;
+      
+      print('📱 [Example 2] Final camera status: $finalCameraStatus');
+      print('📱 [Example 2] Final microphone status: $finalMicStatus');
+      
+      if (mounted) {
+        final granted = finalCameraStatus.isGranted && finalMicStatus.isGranted;
+        setState(() {
+          _hasPermissions = granted;
+        });
+        
+        print('📱 [Example 2] Permissions granted: $granted');
+        
+        // Use request result to check for permanently denied (more reliable on iOS)
+        final cameraPermanentlyDenied = cameraResult.isPermanentlyDenied || finalCameraStatus.isPermanentlyDenied;
+        final micPermanentlyDenied = micResult.isPermanentlyDenied || finalMicStatus.isPermanentlyDenied;
+        
+        print('📱 [Example 2] Camera permanently denied: $cameraPermanentlyDenied (result: ${cameraResult.isPermanentlyDenied}, status: ${finalCameraStatus.isPermanentlyDenied})');
+        print('📱 [Example 2] Microphone permanently denied: $micPermanentlyDenied (result: ${micResult.isPermanentlyDenied}, status: ${finalMicStatus.isPermanentlyDenied})');
+        
+        // If denied permanently, show message
+        if (!granted) {
+          if (cameraPermanentlyDenied || micPermanentlyDenied) {
+            if (mounted) {
+              showDialog(
+                context: context,
+                builder: (context) => AlertDialog(
+                  title: const Text('Permissions Required'),
+                  content: SingleChildScrollView(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          'Camera and microphone permissions are required for video calls.',
+                          style: TextStyle(fontWeight: FontWeight.bold),
+                        ),
+                        const SizedBox(height: 16),
+                        const Text('To enable permissions:'),
+                        const SizedBox(height: 8),
+                        const Text('1. Tap "Open Settings" below'),
+                        const Text('2. Go to Privacy & Security'),
+                        const Text('3. Tap Camera or Microphone'),
+                        const Text('4. Find "Twilio Flutter Video Sdk" and enable it'),
+                        const SizedBox(height: 16),
+                        const Text(
+                          'If you don\'t see this app in Settings:',
+                          style: TextStyle(fontWeight: FontWeight.bold),
+                        ),
+                        const SizedBox(height: 8),
+                        const Text(
+                          '• Delete and reinstall the app\n'
+                          '• Then grant permissions when prompted',
+                          style: TextStyle(fontSize: 12, color: Colors.grey),
+                        ),
+                      ],
+                    ),
+                  ),
+                  actions: [
+                    TextButton(
+                      onPressed: () => Navigator.pop(context),
+                      child: const Text('Cancel'),
+                    ),
+                    TextButton(
+                      onPressed: () {
+                        Navigator.pop(context);
+                        openAppSettings();
+                      },
+                      child: const Text('Open Settings'),
+                    ),
+                  ],
+                ),
+              );
+            }
+          } else {
+            // Show message if denied but not permanently
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Permissions were denied. Please grant camera and microphone access.'),
+                duration: Duration(seconds: 3),
+              ),
+            );
+          }
+        }
+      }
+    } catch (e) {
+      print('❌ [Example 2] Error requesting permissions: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error requesting permissions: $e'),
+            duration: const Duration(seconds: 3),
+          ),
+        );
+      }
+    } finally {
+      _isRequestingPermissions = false;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (!_hasPermissions) {
+      return Scaffold(
+        appBar: AppBar(title: const Text('Example 2: Custom VideoRoomScreen')),
+        body: Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const Icon(Icons.camera_alt, size: 64, color: Colors.grey),
+              const SizedBox(height: 16),
+              const Text(
+                'Camera and Microphone Permissions Required',
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 24),
+              ElevatedButton.icon(
+                onPressed: _requestPermissions,
+                icon: const Icon(Icons.lock_open),
+                label: const Text('Grant Permissions'),
+                style: ElevatedButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Example 2: Custom VideoRoomScreen'),
+      ),
+      body: SingleChildScrollView(
+        padding: const EdgeInsets.all(16.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Card(
+              color: Colors.blue.shade50,
+              child: const Padding(
+                padding: EdgeInsets.all(16.0),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'This example shows how to customize the UI:',
+                      style: TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                    SizedBox(height: 8),
+                    Text('• Custom local video widget'),
+                    Text('• Custom remote video widget'),
+                    Text('• Custom controls layout'),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 24),
+            TextField(
+              controller: _tokenController,
+              decoration: const InputDecoration(
+                labelText: 'Access Token',
+                border: OutlineInputBorder(),
+              ),
+            ),
+            const SizedBox(height: 16),
+            TextField(
+              controller: _roomController,
+              decoration: const InputDecoration(
+                labelText: 'Room Name',
+                border: OutlineInputBorder(),
+              ),
+            ),
+            const SizedBox(height: 24),
+            ElevatedButton(
+              onPressed: () {
+                if (_tokenController.text.isEmpty || _roomController.text.isEmpty) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Please enter token and room name')),
+                  );
+                  return;
+                }
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => VideoRoomScreen(
+                      options: VideoRoomScreenOptions(
+                        accessToken: _tokenController.text,
+                        roomName: _roomController.text,
+                        // Custom local video
+                        localVideoBuilder: (context) => Container(
+                          height: 150,
+                          margin: const EdgeInsets.all(8),
+                          decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(color: Colors.blue, width: 2),
+                          ),
+                          child: ClipRRect(
+                            borderRadius: BorderRadius.circular(10),
+                            child: const TwilioVideoView(viewId: "0"),
+                          ),
+                        ),
+                        // Custom remote video
+                        remoteVideoBuilder: (context, participantSid) => Container(
+                          margin: const EdgeInsets.all(4),
+                          decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: Colors.green, width: 1),
+                          ),
+                          child: Stack(
+                            children: [
+                              ClipRRect(
+                                borderRadius: BorderRadius.circular(7),
+                                child: TwilioVideoView(viewId: participantSid),
+                              ),
+                              Positioned(
+                                top: 4,
+                                right: 4,
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                  decoration: BoxDecoration(
+                                    color: Colors.black54,
+                                    borderRadius: BorderRadius.circular(4),
+                                  ),
+                                  child: Text(
+                                    participantSid.substring(0, 8),
+                                    style: const TextStyle(color: Colors.white, fontSize: 10),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        // Custom controls
+                        controlsBuilder: (context, controller) => Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                          children: [
+                            FloatingActionButton(
+                              heroTag: 'mute',
+                              onPressed: controller.toggleMute,
+                              backgroundColor: controller.isMuted ? Colors.red : Colors.green,
+                              child: Icon(controller.isMuted ? Icons.mic_off : Icons.mic),
+                            ),
+                            FloatingActionButton(
+                              heroTag: 'video',
+                              onPressed: controller.toggleVideo,
+                              backgroundColor: controller.isVideoEnabled ? Colors.blue : Colors.grey,
+                              child: Icon(controller.isVideoEnabled ? Icons.videocam : Icons.videocam_off),
+                            ),
+                            FloatingActionButton(
+                              heroTag: 'camera',
+                              onPressed: controller.switchCamera,
+                              backgroundColor: Colors.orange,
+                              child: const Icon(Icons.cameraswitch),
+                            ),
+                            FloatingActionButton(
+                              heroTag: 'disconnect',
+                              onPressed: () {
+                                controller.disconnect();
+                                Navigator.pop(context);
+                              },
+                              backgroundColor: Colors.red,
+                              child: const Icon(Icons.call_end),
+                            ),
+                          ],
+                        ),
+                        onConnected: () => print('✅ Connected'),
+                        onDisconnected: () {
+                          print('❌ Disconnected');
+                          Navigator.pop(context);
+                        },
+                      ),
+                    ),
+                  ),
+                );
+              },
+              style: ElevatedButton.styleFrom(
+                padding: const EdgeInsets.symmetric(vertical: 16),
+              ),
+              child: const Text('Join Room with Custom UI'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Example 3: Manual implementation (full control)
+class ManualVideoRoomExample extends StatefulWidget {
+  const ManualVideoRoomExample({super.key});
+
+  @override
+  State<ManualVideoRoomExample> createState() => _ManualVideoRoomExampleState();
+}
+
+class _ManualVideoRoomExampleState extends State<ManualVideoRoomExample> {
   final TextEditingController _accessTokenController = TextEditingController();
   final TextEditingController _roomNameController = TextEditingController(text: 'APT-692D5652CECD7');
   final TwilioVideoController _videoController = TwilioVideoController();
@@ -42,6 +779,7 @@ class _VideoRoomScreenState extends State<VideoRoomScreen> {
   bool _isFrontCamera = true;
   String _statusMessage = 'Not connected';
   String? _errorMessage;
+  bool _isRequestingPermissions = false;
   
   StreamSubscription<TwilioVideoEvent>? _eventSubscription;
   StreamSubscription<String>? _errorSubscription;
@@ -71,10 +809,125 @@ class _VideoRoomScreenState extends State<VideoRoomScreen> {
   }
 
   Future<void> _requestPermissions() async {
-    await [
-      Permission.camera,
-      Permission.microphone,
-    ].request();
+    // Prevent multiple simultaneous requests
+    if (_isRequestingPermissions) {
+      print('⏳ [Example 3] Permission request already in progress');
+      return;
+    }
+    
+    try {
+      _isRequestingPermissions = true;
+      print('📱 [Example 3] Requesting permissions...');
+      
+      // Check current status first
+      final cameraStatus = await Permission.camera.status;
+      final microphoneStatus = await Permission.microphone.status;
+      
+      print('📱 [Example 3] Camera status: $cameraStatus');
+      print('📱 [Example 3] Microphone status: $microphoneStatus');
+      
+      // If already granted, return early
+      if (cameraStatus.isGranted && microphoneStatus.isGranted) {
+        print('✅ [Example 3] Permissions already granted');
+        return;
+      }
+      
+      // Request permissions one by one for better iOS compatibility
+      print('📱 [Example 3] Requesting camera permission...');
+      final cameraResult = await Permission.camera.request();
+      print('📱 [Example 3] Camera permission result: $cameraResult');
+      
+      print('📱 [Example 3] Requesting microphone permission...');
+      final micResult = await Permission.microphone.request();
+      print('📱 [Example 3] Microphone permission result: $micResult');
+      
+      // Check final status
+      final finalCameraStatus = await Permission.camera.status;
+      final finalMicStatus = await Permission.microphone.status;
+      
+      print('📱 [Example 3] Final camera status: $finalCameraStatus');
+      print('📱 [Example 3] Final microphone status: $finalMicStatus');
+      
+      // Use request result to check for permanently denied (more reliable on iOS)
+      final cameraPermanentlyDenied = cameraResult.isPermanentlyDenied || finalCameraStatus.isPermanentlyDenied;
+      final micPermanentlyDenied = micResult.isPermanentlyDenied || finalMicStatus.isPermanentlyDenied;
+      
+      print('📱 [Example 3] Camera permanently denied: $cameraPermanentlyDenied (result: ${cameraResult.isPermanentlyDenied}, status: ${finalCameraStatus.isPermanentlyDenied})');
+      print('📱 [Example 3] Microphone permanently denied: $micPermanentlyDenied (result: ${micResult.isPermanentlyDenied}, status: ${finalMicStatus.isPermanentlyDenied})');
+      
+      if ((cameraPermanentlyDenied || micPermanentlyDenied) && mounted) {
+        showDialog(
+          context: context,
+          builder: (context) => AlertDialog(
+            title: const Text('Permissions Required'),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'Camera and microphone permissions are required for video calls.',
+                    style: TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                  const SizedBox(height: 16),
+                  const Text('To enable permissions:'),
+                  const SizedBox(height: 8),
+                  const Text('1. Tap "Open Settings" below'),
+                  const Text('2. Go to Privacy & Security'),
+                  const Text('3. Tap Camera or Microphone'),
+                  const Text('4. Find "Twilio Flutter Video Sdk" and enable it'),
+                  const SizedBox(height: 16),
+                  const Text(
+                    'If you don\'t see this app in Settings:',
+                    style: TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                  const SizedBox(height: 8),
+                  const Text(
+                    '• Delete and reinstall the app\n'
+                    '• Then grant permissions when prompted',
+                    style: TextStyle(fontSize: 12, color: Colors.grey),
+                  ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('Cancel'),
+              ),
+              TextButton(
+                onPressed: () {
+                  Navigator.pop(context);
+                  openAppSettings();
+                },
+                child: const Text('Open Settings'),
+              ),
+            ],
+          ),
+        );
+      } else if (!finalCameraStatus.isGranted || !finalMicStatus.isGranted) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Permissions were denied. Please grant camera and microphone access.'),
+              duration: Duration(seconds: 3),
+            ),
+          );
+        }
+      }
+    } catch (e) {
+      print('❌ [Example 3] Error requesting permissions: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error requesting permissions: $e'),
+            duration: const Duration(seconds: 3),
+          ),
+        );
+      }
+    } finally {
+      _isRequestingPermissions = false;
+    }
   }
 
   Future<void> _joinRoom() async {
@@ -106,9 +959,7 @@ class _VideoRoomScreenState extends State<VideoRoomScreen> {
       });
 
       _participantSubscription = _room!.participantEvents.listen((participant) {
-        print('📱 Participant event: ${participant.identity}, SID: ${participant.sid}, isConnected: $_isConnected');
-        // Don't add to _remoteParticipantSids here - wait for videoTrackAdded event
-        // This ensures the native VideoView exists before Flutter creates PlatformView
+        print('📱 Participant event: ${participant.identity}, SID: ${participant.sid}');
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('Participant ${participant.identity} ${_isConnected ? "connected" : "disconnected"}'),
@@ -263,7 +1114,7 @@ class _VideoRoomScreenState extends State<VideoRoomScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Twilio Video Room'),
+        title: const Text('Example 3: Manual Implementation'),
         backgroundColor: Theme.of(context).colorScheme.inversePrimary,
       ),
       body: SingleChildScrollView(
@@ -271,6 +1122,27 @@ class _VideoRoomScreenState extends State<VideoRoomScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
+            Card(
+              color: Colors.purple.shade50,
+              child: const Padding(
+                padding: EdgeInsets.all(16.0),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'This example shows full manual control:',
+                      style: TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                    SizedBox(height: 8),
+                    Text('• Complete control over UI and logic'),
+                    Text('• Handle all events manually'),
+                    Text('• Customize everything to your needs'),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 16),
+            
             // Status message
             Card(
               child: Padding(
@@ -300,7 +1172,6 @@ class _VideoRoomScreenState extends State<VideoRoomScreen> {
             
             // Access Token Input
             TextField(
-              
               controller: _accessTokenController,
               decoration: const InputDecoration(
                 labelText: 'Access Token',
@@ -367,8 +1238,6 @@ class _VideoRoomScreenState extends State<VideoRoomScreen> {
                           borderRadius: BorderRadius.circular(8),
                           child: const TwilioVideoView(
                             viewId: "0",
-                            width: double.infinity,
-                            height: 200,
                           ),
                         ),
                       ),
@@ -379,23 +1248,6 @@ class _VideoRoomScreenState extends State<VideoRoomScreen> {
               const SizedBox(height: 16),
               
               // Remote video views
-              // IMPORTANT: Only create PlatformViews AFTER receiving videoTrackAdded event
-              // This ensures the native VideoView exists before Flutter tries to access it.
-              // 
-              // Flow:
-              // 1. Participant connects -> participantConnected event (don't create view yet)
-              // 2. Participant enables video -> didEnableVideoTrack (iOS) creates VideoView
-              // 3. Native sends videoTrackAdded event -> Flutter adds participantSid to set
-              // 4. Flutter rebuilds -> Creates TwilioVideoView widget -> PlatformView created
-              // 5. PlatformView factory retrieves VideoView from native (now it exists!)
-              // 
-              // Debug: Check console logs for:
-              // - "Video track event" - confirms track events are received
-              // - "Added remote participant with video" - confirms participantSid is added
-              // - "Creating TwilioVideoView widget" - confirms Flutter widget is created
-              // - "Creating PlatformView" (iOS) - confirms native PlatformView is created
-              // - "Found VideoView" (iOS) - confirms native VideoView is found
-              // - "VideoView not found" (iOS) - means viewId mismatch or timing issue
               if (_remoteParticipantSids.isNotEmpty) ...[
                 Text(
                   'Remote Participants (${_remoteParticipantSids.length})',
@@ -414,9 +1266,6 @@ class _VideoRoomScreenState extends State<VideoRoomScreen> {
                   itemCount: _remoteParticipantSids.length,
                   itemBuilder: (context, index) {
                     final participantSid = _remoteParticipantSids.elementAt(index);
-                    print('🎥 Creating TwilioVideoView widget for participant SID: $participantSid (index: $index)');
-                    print('   Total remote participants: ${_remoteParticipantSids.length}');
-                    print('   All participant SIDs: ${_remoteParticipantSids.toList()}');
                     return Card(
                       child: ClipRRect(
                         borderRadius: BorderRadius.circular(8),
@@ -424,8 +1273,6 @@ class _VideoRoomScreenState extends State<VideoRoomScreen> {
                           children: [
                             TwilioVideoView(
                               viewId: participantSid,
-                              width: double.infinity,
-                              height: double.infinity,
                             ),
                             // Debug overlay showing participant SID
                             Positioned(

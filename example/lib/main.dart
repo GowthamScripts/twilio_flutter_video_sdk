@@ -392,7 +392,7 @@ class CustomVideoRoomExample extends StatefulWidget {
 
 class _CustomVideoRoomExampleState extends State<CustomVideoRoomExample> {
   final TextEditingController _tokenController = TextEditingController();
-  final TextEditingController _roomController = TextEditingController(text: 'APT-692D5652CECD7');
+  final TextEditingController _roomController = TextEditingController(text: 'test');
   bool _hasPermissions = false;
   bool _isRequestingPermissions = false;
 

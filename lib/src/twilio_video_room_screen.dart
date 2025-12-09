@@ -133,6 +133,10 @@ class _VideoRoomScreenState extends State<VideoRoomScreen> {
     _isVideoEnabled = widget.options.enableVideo;
     _isFrontCamera = widget.options.enableFrontCamera;
     _requestPermissions();
+    // Auto-connect on screen load
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _joinRoom();
+    });
   }
 
   @override
@@ -308,265 +312,283 @@ class _VideoRoomScreenState extends State<VideoRoomScreen> {
     }
   }
 
-  Future<void> _switchCamera() async {
-    try {
-      await _controller.switchCamera();
-      setState(() {
-        _isFrontCamera = !_isFrontCamera;
-      });
-      _controller._updateFrontCamera(_isFrontCamera);
-    } catch (e) {
-      setState(() {
-        _errorMessage = e.toString();
-      });
-    }
-  }
+  // Camera switch functionality available via controller if needed
+  // Future<void> _switchCamera() async {
+  //   try {
+  //     await _controller.switchCamera();
+  //     setState(() {
+  //       _isFrontCamera = !_isFrontCamera;
+  //     });
+  //     _controller._updateFrontCamera(_isFrontCamera);
+  //   } catch (e) {
+  //     setState(() {
+  //       _errorMessage = e.toString();
+  //     });
+  //   }
+  // }
 
   @override
   Widget build(BuildContext context) {
+    // If not connected, show loading/connecting state
+    if (!_isConnected) {
+      return Scaffold(
+        backgroundColor: Colors.black,
+        body: Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const CircularProgressIndicator(color: Colors.white),
+              const SizedBox(height: 16),
+              Text(
+                _statusMessage,
+                style: const TextStyle(color: Colors.white, fontSize: 16),
+              ),
+              if (_errorMessage != null)
+                Padding(
+                  padding: const EdgeInsets.only(top: 8.0),
+                  child: Text(
+                    _errorMessage!,
+                    style: const TextStyle(color: Colors.red, fontSize: 14),
+                  ),
+                ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    // Connected state - show video layout
+    final remoteParticipantCount = _remoteParticipantSids.length;
+    final isTwoMemberLayout = remoteParticipantCount == 1;
+
     return Scaffold(
-      appBar: AppBar(
-        title: Text(widget.options.appBarTitle ?? 'Twilio Video Room'),
-        backgroundColor: Theme.of(context).colorScheme.inversePrimary,
+      backgroundColor: Colors.black,
+      body: Stack(
+        children: [
+          // Video content
+          if (isTwoMemberLayout)
+            _buildTwoMemberLayout()
+          else
+            _buildGridLayout(),
+          
+          // Bottom controls overlay
+          Positioned(
+            bottom: 0,
+            left: 0,
+            right: 0,
+            child: _buildBottomControls(context),
+          ),
+        ],
       ),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(16.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
+    );
+  }
+
+  Widget _buildTwoMemberLayout() {
+    return Stack(
+      children: [
+        // Remote video - full screen
+        if (_remoteParticipantSids.isNotEmpty)
+          SizedBox.expand(
+            child: TwilioVideoView(
+              viewId: _remoteParticipantSids.first,
+            ),
+          )
+        else
+          const Center(
+            child: Text(
+              'Waiting for remote participant...',
+              style: TextStyle(color: Colors.white),
+            ),
+          ),
+        
+        // Back button - top left
+        Positioned(
+          top: 40,
+          left: 16,
+          child: SafeArea(
+            child: GestureDetector(
+              onTap: () => Navigator.of(context).pop(),
+              child: Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: Colors.black54,
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(
+                  Icons.arrow_back,
+                  color: Colors.white,
+                  size: 24,
+                ),
+              ),
+            ),
+          ),
+        ),
+        
+        // Local video - small top corner
+        Positioned(
+          top: 40,
+          right: 16,
+          child: SafeArea(
+            child: Container(
+              width: 120,
+              height: 160,
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.white, width: 2),
+              ),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(6),
+                child: const TwilioVideoView(
+                  viewId: "0",
+                ),
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildGridLayout() {
+    if (_remoteParticipantSids.isEmpty) {
+      return const Center(
+        child: Text(
+          'Waiting for remote participants...',
+          style: TextStyle(color: Colors.white),
+        ),
+      );
+    }
+
+    // Calculate grid dimensions
+    final participantCount = _remoteParticipantSids.length;
+    int crossAxisCount = 2;
+    if (participantCount <= 2) {
+      crossAxisCount = 2;
+    } else if (participantCount <= 4) {
+      crossAxisCount = 2;
+    } else if (participantCount <= 6) {
+      crossAxisCount = 3;
+    } else {
+      crossAxisCount = 3;
+    }
+
+    return GridView.builder(
+      padding: const EdgeInsets.all(8),
+      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: crossAxisCount,
+        crossAxisSpacing: 8,
+        mainAxisSpacing: 8,
+        childAspectRatio: 4 / 3,
+      ),
+      itemCount: participantCount,
+      itemBuilder: (context, index) {
+        final participantSid = _remoteParticipantSids.elementAt(index);
+        return ClipRRect(
+          borderRadius: BorderRadius.circular(8),
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              TwilioVideoView(viewId: participantSid),
+              // Optional: Add participant label
+              Positioned(
+                bottom: 8,
+                left: 8,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 4,
+                  ),
+                  decoration: BoxDecoration(
+                    color: Colors.black54,
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                  child: Text(
+                    participantSid.substring(0, 8),
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 12,
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildBottomControls(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 16),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [
+            Colors.transparent,
+            Colors.black.withOpacity(0.7),
+          ],
+        ),
+      ),
+      child: SafeArea(
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
           children: [
-            // Status message
-            Card(
-              child: Padding(
-                padding: const EdgeInsets.all(16.0),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'Status: $_statusMessage',
-                      style: Theme.of(context).textTheme.titleMedium,
-                    ),
-                    if (_errorMessage != null)
-                      Padding(
-                        padding: const EdgeInsets.only(top: 8.0),
-                        child: Text(
-                          _errorMessage!,
-                          style: TextStyle(
-                            color: Theme.of(context).colorScheme.error,
-                          ),
-                        ),
-                      ),
-                  ],
-                ),
-              ),
+            // Toggle Camera (Enable/Disable Local Video)
+            _buildControlButton(
+              icon: _isVideoEnabled ? Icons.videocam : Icons.videocam_off,
+              onPressed: _toggleVideo,
+              backgroundColor: _isVideoEnabled ? Colors.white : Colors.grey,
+              iconColor: _isVideoEnabled ? Colors.black : Colors.white,
             ),
-            const SizedBox(height: 16),
             
-            // Input fields (if enabled)
-            if (widget.options.showInputFields) ...[
-              TextField(
-                controller: _accessTokenController,
-                decoration: const InputDecoration(
-                  labelText: 'Access Token',
-                  hintText: 'Enter your Twilio access token',
-                  border: OutlineInputBorder(),
-                ),
-                enabled: !_isConnected,
-              ),
-              const SizedBox(height: 16),
-              TextField(
-                controller: _roomNameController,
-                decoration: const InputDecoration(
-                  labelText: 'Room Name',
-                  hintText: 'Enter room name',
-                  border: OutlineInputBorder(),
-                ),
-                enabled: !_isConnected,
-              ),
-              const SizedBox(height: 24),
-            ],
-            
-            // Join/Disconnect Button
-            ElevatedButton(
-              onPressed: _isConnected ? _disconnect : _joinRoom,
-              style: ElevatedButton.styleFrom(
-                padding: const EdgeInsets.symmetric(vertical: 16),
-                backgroundColor: _isConnected
-                    ? Colors.red
-                    : Theme.of(context).primaryColor,
-              ),
-              child: Text(
-                _isConnected ? 'End Meeting' : 'Join Room',
-                style: const TextStyle(fontSize: 16, color: Colors.white),
-              ),
+            // Mute/Unmute
+            _buildControlButton(
+              icon: _isMuted ? Icons.mic_off : Icons.mic,
+              onPressed: _toggleMute,
+              backgroundColor: _isMuted ? Colors.grey : Colors.white,
+              iconColor: _isMuted ? Colors.white : Colors.black,
             ),
-            const SizedBox(height: 24),
             
-            // Video Views (only visible when connected)
-            if (_isConnected) ...[
-              const Divider(),
-              const SizedBox(height: 16),
-              Text(
-                'Video',
-                style: Theme.of(context).textTheme.titleLarge,
-              ),
-              const SizedBox(height: 16),
-              
-              // Local video
-              if (widget.options.localVideoBuilder != null)
-                widget.options.localVideoBuilder!(context)
-              else
-                Card(
-                  child: Padding(
-                    padding: const EdgeInsets.all(8.0),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'Local Video',
-                          style: Theme.of(context).textTheme.titleSmall,
-                        ),
-                        const SizedBox(height: 8),
-                        SizedBox(
-                          height: 200,
-                          child: ClipRRect(
-                            borderRadius: BorderRadius.circular(8),
-                            child: const TwilioVideoView(
-                              viewId: "0",
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              const SizedBox(height: 16),
-              
-              // Remote videos
-              if (_remoteParticipantSids.isNotEmpty) ...[
-                if (widget.options.remoteVideoBuilder != null)
-                  ..._remoteParticipantSids.map((sid) => 
-                    widget.options.remoteVideoBuilder!(context, sid)
-                  )
-                else
-                  GridView.builder(
-                    shrinkWrap: true,
-                    physics: const NeverScrollableScrollPhysics(),
-                    gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                      crossAxisCount: 2,
-                      crossAxisSpacing: 8,
-                      mainAxisSpacing: 8,
-                      childAspectRatio: 4 / 3,
-                    ),
-                    itemCount: _remoteParticipantSids.length,
-                    itemBuilder: (context, index) {
-                      final participantSid = _remoteParticipantSids.elementAt(index);
-                      return Card(
-                        child: ClipRRect(
-                          borderRadius: BorderRadius.circular(8),
-                          child: Stack(
-                            children: [
-                              TwilioVideoView(viewId: participantSid),
-                              Positioned(
-                                bottom: 8,
-                                left: 8,
-                                child: Container(
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 8,
-                                    vertical: 4,
-                                  ),
-                                  decoration: BoxDecoration(
-                                    color: Colors.black54,
-                                    borderRadius: BorderRadius.circular(4),
-                                  ),
-                                  child: Text(
-                                    participantSid.substring(0, 8),
-                                    style: const TextStyle(
-                                      color: Colors.white,
-                                      fontSize: 12,
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      );
-                    },
-                  ),
-              ] else if (_isConnected) ...[
-                const Padding(
-                  padding: EdgeInsets.all(16.0),
-                  child: Center(
-                    child: Text(
-                      'Waiting for remote participants...',
-                      style: TextStyle(color: Colors.grey),
-                    ),
-                  ),
-                ),
-              ],
-              
-              const Divider(),
-              const SizedBox(height: 16),
-              Text(
-                'Controls',
-                style: Theme.of(context).textTheme.titleLarge,
-              ),
-              const SizedBox(height: 16),
-              
-              // Controls
-              if (widget.options.controlsBuilder != null)
-                widget.options.controlsBuilder!(context, _controller)
-              else
-                _buildDefaultControls(context),
-            ],
+            // End Call
+            _buildControlButton(
+              icon: Icons.call_end,
+              onPressed: _disconnect,
+              backgroundColor: Colors.red,
+              iconColor: Colors.white,
+              size: 56,
+            ),
           ],
         ),
       ),
     );
   }
 
-  Widget _buildDefaultControls(BuildContext context) {
-    return Column(
-      children: [
-        // Mute/Unmute Button
-        ElevatedButton.icon(
-          onPressed: _toggleMute,
-          icon: Icon(_isMuted ? Icons.mic_off : Icons.mic),
-          label: Text(_isMuted ? 'Unmute' : 'Mute'),
-          style: ElevatedButton.styleFrom(
-            padding: const EdgeInsets.symmetric(vertical: 16),
-            backgroundColor: _isMuted ? Colors.grey : Colors.green,
-            minimumSize: const Size(double.infinity, 48),
-          ),
+  Widget _buildControlButton({
+    required IconData icon,
+    required VoidCallback onPressed,
+    required Color backgroundColor,
+    required Color iconColor,
+    double size = 48,
+  }) {
+    return GestureDetector(
+      onTap: onPressed,
+      child: Container(
+        width: size,
+        height: size,
+        decoration: BoxDecoration(
+          color: backgroundColor,
+          shape: BoxShape.circle,
         ),
-        const SizedBox(height: 12),
-        
-        // Video On/Off Button
-        ElevatedButton.icon(
-          onPressed: _toggleVideo,
-          icon: Icon(_isVideoEnabled ? Icons.videocam : Icons.videocam_off),
-          label: Text(_isVideoEnabled ? 'Turn Video Off' : 'Turn Video On'),
-          style: ElevatedButton.styleFrom(
-            padding: const EdgeInsets.symmetric(vertical: 16),
-            backgroundColor: _isVideoEnabled ? Colors.blue : Colors.grey,
-            minimumSize: const Size(double.infinity, 48),
-          ),
+        child: Icon(
+          icon,
+          color: iconColor,
+          size: size * 0.5,
         ),
-        const SizedBox(height: 12),
-        
-        // Switch Camera Button
-        ElevatedButton.icon(
-          onPressed: _switchCamera,
-          icon: const Icon(Icons.cameraswitch),
-          label: Text(_isFrontCamera ? 'Switch to Back Camera' : 'Switch to Front Camera'),
-          style: ElevatedButton.styleFrom(
-            padding: const EdgeInsets.symmetric(vertical: 16),
-            backgroundColor: Colors.orange,
-            minimumSize: const Size(double.infinity, 48),
-          ),
-        ),
-      ],
+      ),
     );
   }
+
 }
 

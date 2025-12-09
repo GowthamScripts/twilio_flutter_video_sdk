@@ -192,6 +192,7 @@ class _VideoRoomScreenState extends State<VideoRoomScreen> {
       });
 
       _participantSubscription = room.participantEvents.listen((participant) {
+        if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('Participant ${participant.identity} ${_isConnected ? "connected" : "disconnected"}'),

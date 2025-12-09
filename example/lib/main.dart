@@ -134,24 +134,18 @@ class _SimpleVideoRoomExampleState extends State<SimpleVideoRoomExample> {
   Future<void> _requestPermissions() async {
     // Prevent multiple simultaneous requests
     if (_isRequestingPermissions) {
-      print('⏳ [Example 1] Permission request already in progress');
       return;
     }
     
     try {
       _isRequestingPermissions = true;
-      print('📱 [Example 1] Requesting permissions...');
       
       // Check current status first
       final cameraStatus = await Permission.camera.status;
       final microphoneStatus = await Permission.microphone.status;
       
-      print('📱 [Example 1] Camera status: $cameraStatus');
-      print('📱 [Example 1] Microphone status: $microphoneStatus');
-      
       // If already granted, update state
       if (cameraStatus.isGranted && microphoneStatus.isGranted) {
-        print('✅ [Example 1] Permissions already granted');
         if (mounted) {
           setState(() {
             _hasPermissions = true;
@@ -161,20 +155,13 @@ class _SimpleVideoRoomExampleState extends State<SimpleVideoRoomExample> {
       }
       
       // Request permissions one by one for better iOS compatibility
-      print('📱 [Example 1] Requesting camera permission...');
       final cameraResult = await Permission.camera.request();
-      print('📱 [Example 1] Camera permission result: $cameraResult');
       
-      print('📱 [Example 1] Requesting microphone permission...');
       final micResult = await Permission.microphone.request();
-      print('📱 [Example 1] Microphone permission result: $micResult');
       
       // Check final status
       final finalCameraStatus = await Permission.camera.status;
       final finalMicStatus = await Permission.microphone.status;
-      
-      print('📱 [Example 1] Final camera status: $finalCameraStatus');
-      print('📱 [Example 1] Final microphone status: $finalMicStatus');
       
       if (mounted) {
         final granted = finalCameraStatus.isGranted && finalMicStatus.isGranted;
@@ -182,14 +169,9 @@ class _SimpleVideoRoomExampleState extends State<SimpleVideoRoomExample> {
           _hasPermissions = granted;
         });
         
-        print('📱 [Example 1] Permissions granted: $granted');
-        
         // Use request result to check for permanently denied (more reliable on iOS)
         final cameraPermanentlyDenied = cameraResult.isPermanentlyDenied || finalCameraStatus.isPermanentlyDenied;
         final micPermanentlyDenied = micResult.isPermanentlyDenied || finalMicStatus.isPermanentlyDenied;
-        
-        print('📱 [Example 1] Camera permanently denied: $cameraPermanentlyDenied (result: ${cameraResult.isPermanentlyDenied}, status: ${finalCameraStatus.isPermanentlyDenied})');
-        print('📱 [Example 1] Microphone permanently denied: $micPermanentlyDenied (result: ${micResult.isPermanentlyDenied}, status: ${finalMicStatus.isPermanentlyDenied})');
         
         // If denied permanently, show message
         if (!granted) {
@@ -257,7 +239,6 @@ class _SimpleVideoRoomExampleState extends State<SimpleVideoRoomExample> {
         }
       }
     } catch (e) {
-      print('❌ [Example 1] Error requesting permissions: $e');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -376,14 +357,13 @@ class _SimpleVideoRoomExampleState extends State<SimpleVideoRoomExample> {
                         enableVideo: true,
                         enableFrontCamera: true,
                         onConnected: () {
-                          print('✅ Connected to room!');
+                          // Connected to room
                         },
                         onDisconnected: () {
-                          print('❌ Disconnected from room');
                           Navigator.pop(context);
                         },
                         onConnectionFailure: (error) {
-                          print('❌ Connection failed: $error');
+                          // Connection failed
                         },
                       ),
                     ),
@@ -432,24 +412,18 @@ class _CustomVideoRoomExampleState extends State<CustomVideoRoomExample> {
   Future<void> _requestPermissions() async {
     // Prevent multiple simultaneous requests
     if (_isRequestingPermissions) {
-      print('⏳ [Example 2] Permission request already in progress');
       return;
     }
     
     try {
       _isRequestingPermissions = true;
-      print('📱 [Example 2] Requesting permissions...');
       
       // Check current status first
       final cameraStatus = await Permission.camera.status;
       final microphoneStatus = await Permission.microphone.status;
       
-      print('📱 [Example 2] Camera status: $cameraStatus');
-      print('📱 [Example 2] Microphone status: $microphoneStatus');
-      
       // If already granted, update state
       if (cameraStatus.isGranted && microphoneStatus.isGranted) {
-        print('✅ [Example 2] Permissions already granted');
         if (mounted) {
           setState(() {
             _hasPermissions = true;
@@ -459,20 +433,13 @@ class _CustomVideoRoomExampleState extends State<CustomVideoRoomExample> {
       }
       
       // Request permissions one by one for better iOS compatibility
-      print('📱 [Example 2] Requesting camera permission...');
       final cameraResult = await Permission.camera.request();
-      print('📱 [Example 2] Camera permission result: $cameraResult');
       
-      print('📱 [Example 2] Requesting microphone permission...');
       final micResult = await Permission.microphone.request();
-      print('📱 [Example 2] Microphone permission result: $micResult');
       
       // Check final status
       final finalCameraStatus = await Permission.camera.status;
       final finalMicStatus = await Permission.microphone.status;
-      
-      print('📱 [Example 2] Final camera status: $finalCameraStatus');
-      print('📱 [Example 2] Final microphone status: $finalMicStatus');
       
       if (mounted) {
         final granted = finalCameraStatus.isGranted && finalMicStatus.isGranted;
@@ -480,14 +447,9 @@ class _CustomVideoRoomExampleState extends State<CustomVideoRoomExample> {
           _hasPermissions = granted;
         });
         
-        print('📱 [Example 2] Permissions granted: $granted');
-        
         // Use request result to check for permanently denied (more reliable on iOS)
         final cameraPermanentlyDenied = cameraResult.isPermanentlyDenied || finalCameraStatus.isPermanentlyDenied;
         final micPermanentlyDenied = micResult.isPermanentlyDenied || finalMicStatus.isPermanentlyDenied;
-        
-        print('📱 [Example 2] Camera permanently denied: $cameraPermanentlyDenied (result: ${cameraResult.isPermanentlyDenied}, status: ${finalCameraStatus.isPermanentlyDenied})');
-        print('📱 [Example 2] Microphone permanently denied: $micPermanentlyDenied (result: ${micResult.isPermanentlyDenied}, status: ${finalMicStatus.isPermanentlyDenied})');
         
         // If denied permanently, show message
         if (!granted) {
@@ -555,7 +517,6 @@ class _CustomVideoRoomExampleState extends State<CustomVideoRoomExample> {
         }
       }
     } catch (e) {
-      print('❌ [Example 2] Error requesting permissions: $e');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -737,9 +698,10 @@ class _CustomVideoRoomExampleState extends State<CustomVideoRoomExample> {
                             ),
                           ],
                         ),
-                        onConnected: () => print('✅ Connected'),
+                        onConnected: () {
+                          // Connected
+                        },
                         onDisconnected: () {
-                          print('❌ Disconnected');
                           Navigator.pop(context);
                         },
                       ),
@@ -811,49 +773,33 @@ class _ManualVideoRoomExampleState extends State<ManualVideoRoomExample> {
   Future<void> _requestPermissions() async {
     // Prevent multiple simultaneous requests
     if (_isRequestingPermissions) {
-      print('⏳ [Example 3] Permission request already in progress');
       return;
     }
     
     try {
       _isRequestingPermissions = true;
-      print('📱 [Example 3] Requesting permissions...');
       
       // Check current status first
       final cameraStatus = await Permission.camera.status;
       final microphoneStatus = await Permission.microphone.status;
       
-      print('📱 [Example 3] Camera status: $cameraStatus');
-      print('📱 [Example 3] Microphone status: $microphoneStatus');
-      
       // If already granted, return early
       if (cameraStatus.isGranted && microphoneStatus.isGranted) {
-        print('✅ [Example 3] Permissions already granted');
         return;
       }
       
       // Request permissions one by one for better iOS compatibility
-      print('📱 [Example 3] Requesting camera permission...');
       final cameraResult = await Permission.camera.request();
-      print('📱 [Example 3] Camera permission result: $cameraResult');
       
-      print('📱 [Example 3] Requesting microphone permission...');
       final micResult = await Permission.microphone.request();
-      print('📱 [Example 3] Microphone permission result: $micResult');
       
       // Check final status
       final finalCameraStatus = await Permission.camera.status;
       final finalMicStatus = await Permission.microphone.status;
       
-      print('📱 [Example 3] Final camera status: $finalCameraStatus');
-      print('📱 [Example 3] Final microphone status: $finalMicStatus');
-      
       // Use request result to check for permanently denied (more reliable on iOS)
       final cameraPermanentlyDenied = cameraResult.isPermanentlyDenied || finalCameraStatus.isPermanentlyDenied;
       final micPermanentlyDenied = micResult.isPermanentlyDenied || finalMicStatus.isPermanentlyDenied;
-      
-      print('📱 [Example 3] Camera permanently denied: $cameraPermanentlyDenied (result: ${cameraResult.isPermanentlyDenied}, status: ${finalCameraStatus.isPermanentlyDenied})');
-      print('📱 [Example 3] Microphone permanently denied: $micPermanentlyDenied (result: ${micResult.isPermanentlyDenied}, status: ${finalMicStatus.isPermanentlyDenied})');
       
       if ((cameraPermanentlyDenied || micPermanentlyDenied) && mounted) {
         showDialog(
@@ -916,7 +862,6 @@ class _ManualVideoRoomExampleState extends State<ManualVideoRoomExample> {
         }
       }
     } catch (e) {
-      print('❌ [Example 3] Error requesting permissions: $e');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -959,7 +904,7 @@ class _ManualVideoRoomExampleState extends State<ManualVideoRoomExample> {
       });
 
       _participantSubscription = _room!.participantEvents.listen((participant) {
-        print('📱 Participant event: ${participant.identity}, SID: ${participant.sid}');
+        if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('Participant ${participant.identity} ${_isConnected ? "connected" : "disconnected"}'),
@@ -972,20 +917,16 @@ class _ManualVideoRoomExampleState extends State<ManualVideoRoomExample> {
       // AND native VideoView is ready. This ensures the native VideoView exists before Flutter 
       // tries to create PlatformView, preventing "Waiting for video..." placeholders.
       _videoTrackSubscription = _room!.videoTrackEvents.listen((track) {
-        print('🎥 Video track event: participantSid=${track.participantSid}, enabled=${track.isEnabled}, trackSid=${track.trackSid}, nativeViewReady=${track.nativeViewReady}');
         setState(() {
           if (track.isEnabled && track.nativeViewReady) {
             // Only add when track is enabled AND native view is ready
             // This ensures the native VideoView exists before Flutter creates PlatformView
             if (!_remoteParticipantSids.contains(track.participantSid)) {
               _remoteParticipantSids.add(track.participantSid);
-              print('✅ Added remote participant with video (native view ready): ${track.participantSid}, total: ${_remoteParticipantSids.length}');
             }
           } else {
             // Remove when track is disabled, removed, or native view not ready
-            if (_remoteParticipantSids.remove(track.participantSid)) {
-              print('❌ Removed remote participant video: ${track.participantSid}, total: ${_remoteParticipantSids.length}');
-            }
+            _remoteParticipantSids.remove(track.participantSid);
           }
         });
       });

@@ -2,7 +2,7 @@ name: twilio_flutter_video_sdk
 description: "Flutter plugin for Twilio Programmable Video SDK with video conferencing, mute/unmute, camera switching, and meeting management."
 repository: https://github.com/GowthamScripts/twilio_flutter_video_sdk
 homepage: https://github.com/GowthamScripts/twilio_flutter_video_sdk
-version: 1.0.0+1
+version: 1.0.0+2
 
 environment:
   sdk: ^3.10.1
